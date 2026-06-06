@@ -262,13 +262,21 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow-x: auto;
+}
+/* Single scroll container: scrolls both axes. The header lives inside it and is
+   sticky vertically, so it scrolls horizontally together with the rows. */
+.table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.table-inner {
+  min-width: 908px;
 }
 .thead,
 .tr {
   display: grid;
   align-items: center;
-  min-width: 862px;
 }
 .thead {
   position: sticky;
@@ -305,10 +313,8 @@ body {
   padding: 0;
 }
 
-.tbody {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
+.virtual-area {
+  width: 100%;
 }
 .tr {
   border-bottom: 1px solid var(--line);

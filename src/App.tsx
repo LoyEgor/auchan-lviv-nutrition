@@ -39,8 +39,8 @@ const COLUMNS: Column[] = [
   { key: "carbs", label: "Вугл.", align: "right" },
   { key: "proteinPerKcal", label: "Б/100ккал", title: "Білок на 100 ккал — щільність білка", align: "right", accent: true },
   { key: "pricePerProtein", label: "₴/100гБ", title: "Ціна за 100 г білка — раціональність за гроші", align: "right", accent: true },
-  { key: "price", label: "Ціна", align: "right" },
   { key: "pricePer100", label: "₴/100г", title: "Ціна за 100 г / 100 мл", align: "right" },
+  { key: "price", label: "Ціна", align: "right" },
 ];
 
 const NUTRIENTS: { key: NutrientKey; label: string }[] = [
@@ -294,27 +294,6 @@ export default function App() {
       <div className="layout">
         <aside className="sidebar">
           <section>
-            <div className="section-head">
-              <h2>Сценарії</h2>
-              <button className="link" onClick={resetFilters}>
-                Скинути
-              </button>
-            </div>
-            <div className="presets">
-              {PRESETS.map((p) => (
-                <button
-                  key={p.key}
-                  className={activePreset === p.key ? "preset active" : "preset"}
-                  onClick={() => applyPreset(p)}
-                  title={p.desc}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section>
             <h2>Категорії</h2>
             <ul className="cat-list">
               <li>
@@ -338,6 +317,27 @@ export default function App() {
                 </li>
               ))}
             </ul>
+          </section>
+
+          <section>
+            <div className="section-head">
+              <h2>Сценарії</h2>
+              <button className="link" onClick={resetFilters}>
+                Скинути
+              </button>
+            </div>
+            <div className="presets">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  className={activePreset === p.key ? "preset active" : "preset"}
+                  onClick={() => applyPreset(p)}
+                  title={p.desc}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </section>
 
           <section>
@@ -414,69 +414,71 @@ export default function App() {
           </div>
 
           <div className="table">
-            <div className="thead" style={{ gridTemplateColumns: GRID }}>
-              <div className="th th-img" />
-              {COLUMNS.map((col) => (
-                <div
-                  key={col.key}
-                  className={`th sortable ${col.align === "right" ? "right" : ""} ${sortKey === col.key ? "sorted" : ""}`}
-                  title={col.title}
-                  onClick={() => toggleSort(col.key)}
-                >
-                  {col.label}
-                  {sortKey === col.key && <span className="arrow">{sortDir === -1 ? "▼" : "▲"}</span>}
-                </div>
-              ))}
-            </div>
-
-            <div className="tbody" ref={scrollRef}>
-              <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
-                {rowVirtualizer.getVirtualItems().map((vi) => {
-                  const p = filtered[vi.index];
-                  return (
+            <div className="table-scroll" ref={scrollRef}>
+              <div className="table-inner">
+                <div className="thead" style={{ gridTemplateColumns: GRID }}>
+                  <div className="th th-img" />
+                  {COLUMNS.map((col) => (
                     <div
-                      key={p.id}
-                      className="tr"
-                      style={{
-                        gridTemplateColumns: GRID,
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${vi.start}px)`,
-                      }}
+                      key={col.key}
+                      className={`th sortable ${col.align === "right" ? "right" : ""} ${sortKey === col.key ? "sorted" : ""}`}
+                      title={col.title}
+                      onClick={() => toggleSort(col.key)}
                     >
-                      <div className="td td-img">
-                        {p.img ? <img src={p.img} alt="" loading="lazy" /> : <div className="noimg" />}
-                      </div>
-                      <div className="td td-title">
-                        <a href={p.url ?? "#"} target="_blank" rel="noreferrer" className="ttl">
-                          {p.title}
-                        </a>
-                        <div className="sub">
-                          {p.brand && <span className="brand">{p.brand}</span>}
-                          <span className="path">{p.path}</span>
-                          <span className="weight">{fmtWeight(p)}</span>
+                      {col.label}
+                      {sortKey === col.key && <span className="arrow">{sortDir === -1 ? "▼" : "▲"}</span>}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="virtual-area" style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
+                  {rowVirtualizer.getVirtualItems().map((vi) => {
+                    const p = filtered[vi.index];
+                    return (
+                      <div
+                        key={p.id}
+                        className="tr"
+                        style={{
+                          gridTemplateColumns: GRID,
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${vi.start}px)`,
+                        }}
+                      >
+                        <div className="td td-img">
+                          {p.img ? <img src={p.img} alt="" loading="lazy" /> : <div className="noimg" />}
+                        </div>
+                        <div className="td td-title">
+                          <a href={p.url ?? "#"} target="_blank" rel="noreferrer" className="ttl">
+                            {p.title}
+                          </a>
+                          <div className="sub">
+                            {p.brand && <span className="brand">{p.brand}</span>}
+                            <span className="path">{p.path}</span>
+                            <span className="weight">{fmtWeight(p)}</span>
+                          </div>
+                        </div>
+                        <div className="td right">{fmt(nutrientValue(p, "kcal", basis), 0)}</div>
+                        <div className="td right">{fmt(nutrientValue(p, "protein", basis))}</div>
+                        <div className="td right">{fmt(nutrientValue(p, "fat", basis))}</div>
+                        <div className="td right">{fmt(nutrientValue(p, "carbs", basis))}</div>
+                        <div className="td right accent">{fmt(proteinPerKcal(p))}</div>
+                        <div className="td right accent">{fmtPrice(pricePerProtein(p))}</div>
+                        <div className="td right">{fmtPrice(pricePer100g(p))}</div>
+                        <div className="td right">
+                          {fmtPrice(p.price)}
+                          {(p.unit === "kg" || p.unit === "l") && (
+                            <span className="per-unit">/{p.unit === "kg" ? "кг" : "л"}</span>
+                          )}
                         </div>
                       </div>
-                      <div className="td right">{fmt(nutrientValue(p, "kcal", basis), 0)}</div>
-                      <div className="td right">{fmt(nutrientValue(p, "protein", basis))}</div>
-                      <div className="td right">{fmt(nutrientValue(p, "fat", basis))}</div>
-                      <div className="td right">{fmt(nutrientValue(p, "carbs", basis))}</div>
-                      <div className="td right accent">{fmt(proteinPerKcal(p))}</div>
-                      <div className="td right accent">{fmtPrice(pricePerProtein(p))}</div>
-                      <div className="td right">
-                        {fmtPrice(p.price)}
-                        {(p.unit === "kg" || p.unit === "l") && (
-                          <span className="per-unit">/{p.unit === "kg" ? "кг" : "л"}</span>
-                        )}
-                      </div>
-                      <div className="td right">{fmtPrice(pricePer100g(p))}</div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+                {filtered.length === 0 && <div className="empty">Нічого не знайдено — спробуйте змінити фільтри.</div>}
               </div>
-              {filtered.length === 0 && <div className="empty">Нічого не знайдено — спробуйте змінити фільтри.</div>}
             </div>
           </div>
         </main>
@@ -485,4 +487,4 @@ export default function App() {
   );
 }
 
-const GRID = "48px minmax(220px, 1fr) 70px 70px 70px 70px 88px 92px 96px 88px";
+const GRID = "48px minmax(220px, 1fr) 70px 70px 70px 70px 88px 92px 96px 84px";
