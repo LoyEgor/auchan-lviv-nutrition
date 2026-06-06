@@ -1,0 +1,117 @@
+[
+  {
+    "id": "eighteen-plus-auchan",
+    "title": "Алкоголь",
+    "count": 2955
+  },
+  {
+    "id": "sweets-and-snacks-auchan",
+    "title": "Солодощі",
+    "count": 2575
+  },
+  {
+    "id": "dairy-and-eggs-auchan",
+    "title": "Яйця та молочні продукти ",
+    "count": 2255
+  },
+  {
+    "id": "bioproducts-and-diabetic-goods-auchan",
+    "title": "Здорове харчування та спосіб життя ",
+    "count": 1813
+  },
+  {
+    "id": "grocery-and-sweets-auchan",
+    "title": "Бакалія",
+    "count": 1540
+  },
+  {
+    "id": "meat-fish-poultry-auchan",
+    "title": "М'ясо та ковбасні вироби",
+    "count": 1205
+  },
+  {
+    "id": "frozen-auchan",
+    "title": "Заморозка",
+    "count": 1071
+  },
+  {
+    "id": "hot-drinks-auchan",
+    "title": "Гарячі напої",
+    "count": 1012
+  },
+  {
+    "id": "drinks-auchan",
+    "title": "Напої",
+    "count": 901
+  },
+  {
+    "id": "sauces-and-spices-auchan",
+    "title": "Соуси та спеції",
+    "count": 878
+  },
+  {
+    "id": "fruits-and-vegetables-auchan",
+    "title": "Фрукти та овочі",
+    "count": 873
+  },
+  {
+    "id": "fish-and-seafood-auchan",
+    "title": "Риба та морепродукти",
+    "count": 759
+  },
+  {
+    "id": "canned-food-auchan",
+    "title": "Консерви",
+    "count": 756
+  },
+  {
+    "id": "for-animals-auchan",
+    "title": "Товари для тварин",
+    "count": 707
+  },
+  {
+    "id": "world-cuisine-auchan",
+    "title": "Товари світу",
+    "count": 696
+  },
+  {
+    "id": "crisps-and-snacks-auchan",
+    "title": "Чипси та снеки",
+    "count": 637
+  },
+  {
+    "id": "bakery-auchan",
+    "title": "Пекарня",
+    "count": 568
+  },
+  {
+    "id": "babies-auchan",
+    "title": "Товари для дітей",
+    "count": 246
+  },
+  {
+    "id": "ready-meals-auchan",
+    "title": "Кулінарія",
+    "count": 215
+  },
+  {
+    "id": "discount-love-auchan",
+    "title": "ЗнижкоLove",
+    "count": 62
+  },
+  {
+    "id": "personal-hygiene-auchan",
+    "title": "Гігієна та догляд",
+    "count": 35
+  },
+  {
+    "id": "interior-and-textiles-auchan",
+    "title": "Інтер'єр та текстиль",
+    "count": 2
+  },
+  {
+    "id": "low-price-auchan",
+    "title": "Вигідні пропозиції",
+    "count": 2
+  }
+]
