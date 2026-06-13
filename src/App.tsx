@@ -39,6 +39,7 @@ const STORE_BADGE: Record<StoreId, { label: string; cls: string }> = {
   auchan: { label: "Ашан", cls: "store-badge auchan" },
   silpo: { label: "Сільпо", cls: "store-badge silpo" },
 };
+const LOGO_SRC = `${import.meta.env.BASE_URL}images/silpo-auchan-logo.svg`;
 // Ascending is "better" for these (cheaper / text); numbers default to descending.
 const ASC_DEFAULT = new Set<SortKey>(["title", "pricePer100", "pricePerProtein"]);
 
@@ -951,7 +952,7 @@ export default function App() {
         <div className="brand">
           <img
             className="site-logo"
-            src="/images/silpo-auchan-logo.svg"
+            src={LOGO_SRC}
             alt="Сільпо · Ашан · Львів"
             width={120}
             height={29}
