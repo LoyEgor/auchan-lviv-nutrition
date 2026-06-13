@@ -949,14 +949,17 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="logo">🥦</span>
-          <div>
-            <h1>Каталог за КБЖВ · Львів</h1>
-            <p className="muted">
-              {meta.stores.map((s) => s.title).join(" + ")} · {meta.totalKept.toLocaleString("uk-UA")} товарів ·
-              оновлено {new Date(meta.generatedAt).toLocaleDateString("uk-UA")}
-            </p>
-          </div>
+          <img
+            className="site-logo"
+            src="/images/silpo-auchan-logo.svg"
+            alt="Сільпо · Ашан · Львів"
+            width={120}
+            height={29}
+          />
+          <p className="brand-stats">
+            {meta.totalKept.toLocaleString("uk-UA")} товарів · оновлено{" "}
+            {new Date(meta.generatedAt).toLocaleDateString("uk-UA")}
+          </p>
         </div>
         <div className="search-wrap">
           <input
