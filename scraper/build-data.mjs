@@ -76,13 +76,25 @@ const TOP_TO_UNIFIED = {
 
 const r1 = (n) => (typeof n === "number" ? Math.round(n * 10) / 10 : null);
 
+const EXPECTED_STORES = ["auchan", "silpo"];
+
 async function run() {
   const snapshots = [];
-  for (const name of ["auchan", "silpo"]) {
+  const missing = [];
+  for (const name of EXPECTED_STORES) {
     const snap = await readJsonIfExists(join(RAW_DIR, `${name}.json`));
     if (snap?.products?.length) snapshots.push(snap);
-    else console.warn(`[build] no raw snapshot for ${name} — skipping`);
+    else missing.push(name);
   }
+  // Fail hard rather than silently publish a half-store dataset. The deploy
+  // workflow's `npm run scrape || (fallback)` then keeps the last committed
+  // (complete) snapshot. Set BUILD_ALLOW_PARTIAL=1 to override for local dev.
+  if (missing.length && !process.env.BUILD_ALLOW_PARTIAL) {
+    throw new Error(
+      `missing raw snapshot(s): ${missing.join(", ")}. Run the scrapers, or set BUILD_ALLOW_PARTIAL=1 to build with what's present.`
+    );
+  }
+  if (missing.length) console.warn(`[build] BUILD_ALLOW_PARTIAL set — building without: ${missing.join(", ")}`);
   if (!snapshots.length) throw new Error("no raw snapshots found; run the scrapers first");
 
   const unmappedTops = new Map();

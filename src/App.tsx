@@ -237,24 +237,13 @@ function sanitizeSaved(raw: unknown): Partial<SavedState> {
 
 const SAVED = sanitizeSaved(loadJSON(FILTERS_KEY));
 
-function sortValue(p: Product, key: SortKey, basis: Basis): number | null {
-  switch (key) {
-    case "kcal":
-    case "protein":
-    case "fat":
-    case "carbs":
-      return nutrientValue(p, key, basis);
-    case "price":
-      return p.price;
-    case "pricePer100":
-      return pricePer100g(p);
-    case "pricePerProtein":
-      return pricePerProtein(p);
-    case "proteinPerKcal":
-      return proteinPerKcal(p);
-    default:
-      return null;
-  }
+// Basis-independent per-product money/density metrics, computed once per
+// snapshot. Used by the density filter and as sort keys (so they aren't
+// recomputed for every comparison).
+interface Metrics {
+  per100: number | null;
+  density: number | null;
+  perProtein: number | null;
 }
 
 function useIsMobile(): boolean {
@@ -423,12 +412,27 @@ export default function App() {
     }
   }, [categories, category]);
 
-  // Commit the query to search history once typing settles.
+  // Escape closes any open overlay (modals / mobile drawer).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAltFor(null);
+        setXstoreFor(null);
+        setDrawerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Commit the query to search history once typing settles. Depends on the
+  // filter state too, so the snapshot stored reflects the filters that are
+  // active when it commits (not a stale closure from when the query was typed).
   useEffect(() => {
     const t = setTimeout(() => commitToHistory(search), 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, category, store, discountOnly, cheaperElsewhere, completeOnly, minDensity, ranges]);
 
   useEffect(() => {
     const base = import.meta.env.BASE_URL;
@@ -478,17 +482,43 @@ export default function App() {
     return other ? { source: xstoreFor, other, info } : null;
   }, [xstoreFor, crossStore, productById]);
 
+  // Per-product money/density metrics, built once per snapshot (not per render).
+  const metrics = useMemo(() => {
+    const m = new Map<string, Metrics>();
+    for (const p of products) {
+      m.set(p.id, { per100: pricePer100g(p), density: proteinPerKcal(p), perProtein: pricePerProtein(p) });
+    }
+    return m;
+  }, [products]);
+
+  // The search predicate, rebuilt only when the query or index changes — NOT
+  // when an unrelated filter (range, store, category) toggles.
+  const matcher = useMemo(
+    () => (searchIndex ? createMatcher(searchIndex, search) : null),
+    [searchIndex, search]
+  );
+
+  // Parsed nutrient ranges, recomputed only when the range inputs change.
+  const rangeNums = useMemo(
+    () =>
+      NUTRIENTS.map(({ key }) => {
+        const r = ranges[key];
+        const min = r.min === "" ? null : parseFloat(r.min);
+        const max = r.max === "" ? null : parseFloat(r.max);
+        return {
+          key,
+          min: Number.isFinite(min as number) ? min : null,
+          max: Number.isFinite(max as number) ? max : null,
+        };
+      }),
+    [ranges]
+  );
+
   // One pass produces both the visible list and per-category hit counts (the
   // category filter is applied last, so the counts cover all other filters).
   const { filtered, catHits } = useMemo(() => {
-    const matcher = searchIndex ? createMatcher(searchIndex, search) : null;
-    const dens = minDensity === "" ? null : parseFloat(minDensity);
-    const rangeNums = NUTRIENTS.map(({ key }) => {
-      const r = ranges[key];
-      const min = r.min === "" ? null : parseFloat(r.min);
-      const max = r.max === "" ? null : parseFloat(r.max);
-      return { key, min: Number.isNaN(min as number) ? null : min, max: Number.isNaN(max as number) ? null : max };
-    });
+    const densParsed = minDensity === "" ? null : parseFloat(minDensity);
+    const dens = Number.isFinite(densParsed as number) ? (densParsed as number) : null;
 
     const catHits = new Map<string, number>();
     const list: Product[] = [];
@@ -504,8 +534,8 @@ export default function App() {
       if (hidePetFood && p.cat === PET_FOOD_CAT) continue;
       if (inStockOnly && !p.inStock) continue;
       if (plausibleOnly && !isPlausible(p)) continue;
-      if (dens != null && !Number.isNaN(dens)) {
-        const d = proteinPerKcal(p);
+      if (dens != null) {
+        const d = metrics.get(p.id)?.density;
         if (d == null || d < dens) continue;
       }
       if (matcher && !matcher(i)) continue;
@@ -521,12 +551,35 @@ export default function App() {
       list.push(p);
     }
 
-    list.sort((a, b) => {
-      if (sortKey === "title") return a.title.localeCompare(b.title, "uk") * sortDir;
-      return compareNullable(sortValue(a, sortKey, basis), sortValue(b, sortKey, basis), sortDir);
-    });
+    if (sortKey === "title") {
+      list.sort((a, b) => a.title.localeCompare(b.title, "uk") * sortDir);
+    } else {
+      // Schwartzian: compute each sort key once, not twice per comparison.
+      const keyOf = (p: Product): number | null => {
+        switch (sortKey) {
+          case "kcal":
+          case "protein":
+          case "fat":
+          case "carbs":
+            return nutrientValue(p, sortKey, basis);
+          case "price":
+            return p.price;
+          case "pricePer100":
+            return metrics.get(p.id)?.per100 ?? null;
+          case "pricePerProtein":
+            return metrics.get(p.id)?.perProtein ?? null;
+          case "proteinPerKcal":
+            return metrics.get(p.id)?.density ?? null;
+          default:
+            return null;
+        }
+      };
+      const decorated = list.map((p) => ({ p, k: keyOf(p) }));
+      decorated.sort((a, b) => compareNullable(a.k, b.k, sortDir));
+      for (let i = 0; i < decorated.length; i++) list[i] = decorated[i].p;
+    }
     return { filtered: list, catHits };
-  }, [products, searchIndex, crossStore, search, category, store, discountOnly, cheaperElsewhere, completeOnly, inStockOnly, hidePetFood, plausibleOnly, minDensity, ranges, sortKey, sortDir, basis]);
+  }, [products, metrics, matcher, crossStore, category, store, discountOnly, cheaperElsewhere, completeOnly, inStockOnly, hidePetFood, plausibleOnly, minDensity, rangeNums, sortKey, sortDir, basis]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -593,7 +646,8 @@ export default function App() {
   // spelling suggestions) from over-tight filters (→ offer to clear them).
   const emptyState = useMemo(() => {
     if (!searchActive || filtered.length > 0 || !searchIndex) return null;
-    const matcher = createMatcher(searchIndex, search);
+    // Reuse the memoized matcher (no second index build); scan only happens here,
+    // on the rare zero-result render.
     let termMatches = false;
     if (matcher) {
       for (let i = 0; i < products.length; i++)
@@ -604,7 +658,7 @@ export default function App() {
     }
     if (termMatches) return { kind: "filters" as const, suggestions: [] as string[] };
     return { kind: "term" as const, suggestions: suggestTerms(searchIndex, search) };
-  }, [searchActive, filtered.length, searchIndex, search, products]);
+  }, [searchActive, filtered.length, searchIndex, matcher, search, products]);
 
   const emptyBlock =
     filtered.length === 0 ? (
@@ -773,6 +827,7 @@ export default function App() {
           <input
             type="checkbox"
             checked={cheaperElsewhere}
+            disabled={crossStore.size === 0}
             onChange={(e) => setCheaperElsewhere(e.target.checked)}
           />
           Дешевше в іншому магазині
@@ -1068,8 +1123,8 @@ export default function App() {
                               <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
                             )}
                             {!p.inStock && <span className="oos">немає</span>}
-                            <CrossChip info={crossStore.get(p.id)} onOpen={() => setXstoreFor(p)} />
-                            <button className="alt-btn" onClick={() => setAltFor(p)} title="Знайти корисніші варіанти">
+                            <CrossChip info={crossStore.get(p.id)} onOpen={() => { setAltFor(null); setXstoreFor(p); }} />
+                            <button className="alt-btn" onClick={() => { setXstoreFor(null); setAltFor(p); }} title="Знайти корисніші варіанти">
                               🥗 заміна
                             </button>
                             {p.brand && <span className="brand">{p.brand}</span>}
@@ -1157,8 +1212,8 @@ export default function App() {
                                 <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
                               )}
                               {!p.inStock && <span className="oos">немає</span>}
-                              <CrossChip info={crossStore.get(p.id)} onOpen={() => setXstoreFor(p)} />
-                              <button className="alt-btn" onClick={() => setAltFor(p)} title="Знайти корисніші варіанти">
+                              <CrossChip info={crossStore.get(p.id)} onOpen={() => { setAltFor(null); setXstoreFor(p); }} />
+                              <button className="alt-btn" onClick={() => { setXstoreFor(null); setAltFor(p); }} title="Знайти корисніші варіанти">
                                 🥗 заміна
                               </button>
                               {p.brand && <span className="brand">{p.brand}</span>}

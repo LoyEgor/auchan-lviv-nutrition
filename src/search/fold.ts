@@ -57,3 +57,30 @@ export function tokenizeSurface(s: string): { folded: string; surface: string }[
   }
   return out;
 }
+
+// Phonetic Cyrillic→Latin transliteration of a FOLDED word. Catalog brands are
+// stored mostly in their Latin spelling (President, Jacobs, Haribo…), which a
+// Cyrillic query can never reach through folding alone. The output is matched
+// against the vocabulary with the same fuzzy prefix distance, so near-misses
+// (президент→prezident≈president, джакобс→jakobs≈jacobs) still resolve.
+// х→h and дж→j follow how brands actually romanize, not the official standard.
+const TRANSLIT: Record<string, string> = {
+  щ: "shch", ж: "zh", х: "h", ч: "ch", ш: "sh", ц: "ts", ю: "yu", я: "ya", й: "y",
+  а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", з: "z", и: "i", к: "k", л: "l",
+  м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f",
+};
+
+export function translitToLatin(folded: string): string {
+  let out = "";
+  for (let i = 0; i < folded.length; i++) {
+    if (folded[i] === "д" && folded[i + 1] === "ж") {
+      out += "j"; // дж → j (Jacobs, Jaffa…)
+      i++;
+      continue;
+    }
+    out += TRANSLIT[folded[i]] ?? folded[i];
+  }
+  return out;
+}
+
+export const hasCyrillic = (s: string): boolean => /[а-я]/.test(s);

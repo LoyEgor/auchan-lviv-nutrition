@@ -67,8 +67,11 @@ function pctKey(p: Product): string {
 // per-unit size, so without this they'd bucket together and the pack would look
 // many times pricier. Capture the pack count so they never compare.
 function packCount(p: Product): string {
+  // Order matters: an explicit "Nшт" wins; then "N×" (count before the size,
+  // e.g. 6×100г → 6); only last "×N" (count after). Matching "×N" first would
+  // wrongly capture the unit size (100) from "6×100г" as the count.
   const m =
-    p.title.match(/(\d+)\s*шт/) || p.title.match(/[*xх×]\s*(\d+)/) || p.title.match(/(\d+)\s*[*xх×]/);
+    p.title.match(/(\d+)\s*шт/) || p.title.match(/(\d+)\s*[*xх×]/) || p.title.match(/[*xх×]\s*(\d+)/);
   return m ? `n${m[1]}` : "";
 }
 

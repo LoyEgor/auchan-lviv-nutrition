@@ -46,8 +46,13 @@ describe("prefixDistance", () => {
 
   it("handles plain typos and transpositions within budget", () => {
     expect(prefixDistance("молако", "молоко", 1)).toBe(1); // wrong vowel
-    expect(prefixDistance("омлоко", "молоко", 1)).toBe(1); // adjacent swap
+    expect(prefixDistance("молоок", "молоко", 1)).toBe(1); // adjacent swap past the first two letters
     expect(prefixDistance("абвгде", "вгдабе", 1)).toBe(Infinity);
+  });
+
+  it("bars transpositions in the first two letters (word starts must be right)", () => {
+    // swap at the very start is treated like any other start edit → rejected
+    expect(prefixDistance("омлоко", "молоко", 1)).toBe(Infinity);
   });
 
   it("matches same-root RU words against UK tokens", () => {
@@ -102,6 +107,10 @@ describe("createMatcher (integration)", () => {
     { title: "Олія соняшникова Олейна 1л", brand: "Олейна", path: "Бакалія / Олія" },
     { title: "Сир твердий Гауда", brand: null, path: "Молочне / Сири тверді" },
     { title: "Морква мита", brand: null, path: "Фрукти та овочі / Овочі" },
+    { title: "Кава Jacobs Monarch розчинна 200г", brand: "Jacobs", path: "Гарячі напої / Кава" },
+    { title: "Чипси Lay's зі сметаною 133г", brand: "Lay's", path: "Чипси та снеки" },
+    { title: "Качка свіжа охолоджена", brand: null, path: "М'ясо / Птиця" },
+    { title: "Напій газований Живчик 0.5л", brand: "Живчик", path: "Напої / Газовані" },
   ];
   const index = buildSearchIndex(products);
   const titlesFor = (query: string) => {
@@ -109,6 +118,23 @@ describe("createMatcher (integration)", () => {
     if (!m) return products.map((p) => p.title);
     return products.filter((_, i) => m(i)).map((p) => p.title);
   };
+
+  it("matches Latin brands typed in Cyrillic via transliteration", () => {
+    expect(titlesFor("джакобс")).toContain("Кава Jacobs Monarch розчинна 200г");
+    expect(titlesFor("президент")).toContain("Сир кисломолочний President 9% 300г");
+    // лейс→lays handled by a dictionary entry (transliteration can't bridge it)
+    expect(titlesFor("лейс")).toContain("Чипси Lay's зі сметаною 133г");
+  });
+
+  it("does not transliterate ordinary Cyrillic words into brand noise", () => {
+    // "морква" shouldn't pull in Jacobs/Lay's via transliteration
+    expect(titlesFor("морква")).toEqual(["Морква мита"]);
+  });
+
+  it("resolves new RU/colloquial dictionary entries", () => {
+    expect(titlesFor("утка")).toContain("Качка свіжа охолоджена");
+    expect(titlesFor("газировка")).toContain("Напій газований Живчик 0.5л");
+  });
 
   it("returns null matcher for empty/garbage queries", () => {
     expect(createMatcher(index, "")).toBeNull();

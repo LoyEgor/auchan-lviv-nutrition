@@ -52,7 +52,9 @@ const slugKey = (slug) => String(slug).replace(/-\d+$/, "");
 function parseSize(displayRatio, weighted) {
   // Weighted goods (meat, produce…) are priced per kg, like zakaz "kg" goods.
   if (weighted) return { unit: "kg", weight: null, volume: null };
-  const s = String(displayRatio || "").toLowerCase().replace(/\s+/g, "");
+  // Normalize whitespace and all multiplier glyphs (latin x, cyrillic х, ×) to a
+  // single "x" so multipack patterns match regardless of which was used.
+  const s = String(displayRatio || "").toLowerCase().replace(/\s+/g, "").replace(/[xх×]/g, "x");
   const sized = (n, u) => {
     if (!Number.isFinite(n) || n <= 0) return { unit: "pcs", weight: null, volume: null };
     if (u === "кг") return { unit: "pcs", weight: n * 1000, volume: null };
@@ -60,8 +62,8 @@ function parseSize(displayRatio, weighted) {
     if (u === "л") return { unit: "pcs", weight: null, volume: n * 1000 };
     return { unit: "pcs", weight: null, volume: n }; // мл
   };
-  // Multipacks: "4х90г", "6x50мл" (cyrillic or latin x).
-  let m = s.match(/^(\d+)[xх×]([\d.,]+)(кг|г|мл|л)/);
+  // Multipacks: "4х90г", "6x50мл" — all x-glyphs normalized to "x" above.
+  let m = s.match(/^(\d+)x([\d.,]+)(кг|г|мл|л)/);
   if (m) return sized(parseInt(m[1], 10) * parseFloat(m[2].replace(",", ".")), m[3]);
   m = s.match(/([\d.,]+)(кг|г|мл|л)/);
   if (m) return sized(parseFloat(m[1].replace(",", ".")), m[2]);

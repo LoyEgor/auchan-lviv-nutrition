@@ -22,7 +22,7 @@ export function nutrientValue(p: Product, key: NutrientKey, basis: Basis): numbe
 
 // Price normalized to 100 g/ml (basis-independent value-for-money comparison).
 export function pricePer100g(p: Product): number | null {
-  if (p.price == null) return null;
+  if (p.price == null || p.price <= 0) return null; // unpriced / placeholder → no metric
   // Weight/volume-priced goods ("kg"/"l"): the stored price is already per 1000 unit.
   if (p.unit === "kg" || p.unit === "l") return p.price / 10;
   // Packaged goods: normalize by mass, or by volume (ml) when mass is unknown.
@@ -49,6 +49,8 @@ export function pricePerProtein(p: Product): number | null {
 // Heuristic: items missing any macro, or with sugar alcohols/fibre, are kept.
 export function isPlausible(p: Product): boolean {
   if (p.kcal == null || p.protein == null || p.fat == null || p.carbs == null) return true;
+  // A negative macro is impossible data → never plausible.
+  if (p.protein < 0 || p.fat < 0 || p.carbs < 0 || p.kcal < 0) return false;
   if (p.kcal < 5) return true;
   const calc = 4 * p.protein + 9 * p.fat + 4 * p.carbs;
   return Math.abs(calc - p.kcal) / p.kcal <= 0.5;
@@ -58,22 +60,22 @@ const nf0 = new Intl.NumberFormat("uk-UA", { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat("uk-UA", { maximumFractionDigits: 1 });
 
 export function fmt(n: number | null, digits: 0 | 1 = 1): string {
-  if (n == null || Number.isNaN(n)) return "—";
+  if (n == null || !Number.isFinite(n) || n < 0) return "—";
   return (digits === 0 ? nf0 : nf1).format(n);
 }
 
 export function fmtPrice(n: number | null): string {
-  if (n == null) return "—";
+  if (n == null || !Number.isFinite(n) || n < 0) return "—";
   return `${nf1.format(n)} ₴`;
 }
 
 export function fmtWeight(p: Product): string {
   if (p.unit === "kg") return "за кг";
   if (p.unit === "l") return "за л";
-  if (p.weight && p.weight > 0) {
+  if (p.weight && Number.isFinite(p.weight) && p.weight > 0) {
     return p.weight >= 1000 ? `${fmt(p.weight / 1000)} кг` : `${fmt(p.weight, 0)} г`;
   }
-  if (p.volume && p.volume > 0) {
+  if (p.volume && Number.isFinite(p.volume) && p.volume > 0) {
     return p.volume >= 1000 ? `${fmt(p.volume / 1000)} л` : `${fmt(p.volume, 0)} мл`;
   }
   return p.unit === "pcs" ? "шт" : "—";

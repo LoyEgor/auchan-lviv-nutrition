@@ -64,8 +64,10 @@ export function prefixDistance(word: string, token: string, maxCost: number): nu
       let v = sub <= 0.5 || (i > 2 && j > 2) ? prev[j - 1] + sub : Infinity;
       if (i > 2) v = Math.min(v, prev[j] + 1); // delete from word
       if (j > 2) v = Math.min(v, cur[j - 1] + 1); // insert into word
-      if (i > 1 && j > 1 && wc === token[j - 2] && word[i - 2] === tc && prevPrev) {
-        v = Math.min(v, prevPrev[j - 2] + 1); // transposition
+      // Transposition — also barred from the first two letters, like the other
+      // full-cost edits, so word starts stay anchored.
+      if (i > 2 && j > 2 && wc === token[j - 2] && word[i - 2] === tc && prevPrev) {
+        v = Math.min(v, prevPrev[j - 2] + 1);
       }
       cur[j] = v;
       if (v < rowMin) rowMin = v;

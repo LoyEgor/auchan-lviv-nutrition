@@ -17,6 +17,10 @@ export async function fetchJson(url, { headers = {}, tries = 5, timeoutMs = 3000
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
       if (res.status === 200) return await res.json();
       if (res.status === 404) return null;
+      // Client errors other than 404/429 won't fix on retry — fail fast.
+      if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+        throw new Error(`HTTP ${res.status} (not retryable)`);
+      }
       lastErr = new Error(`HTTP ${res.status}`);
       // Back off harder when the API is throttling or failing.
       await sleep((res.status === 429 || res.status >= 500 ? 1500 : 600) * (i + 1));
