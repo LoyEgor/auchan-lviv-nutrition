@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Каталог за КБЖУ · Ашан і Сільпо (Львів)</title>
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // Apply the saved (or system) theme before first paint to avoid a flash.
+      // Key must match THEME_KEY in src/persist.ts; value is a raw "light"/"dark".
+      (function () {
+        try {
+          var t = localStorage.getItem("food.theme.v1");
+          if (t !== "light" && t !== "dark") {
+            t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

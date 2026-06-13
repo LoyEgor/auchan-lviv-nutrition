@@ -9,6 +9,68 @@
   --hover: #f0f7f2;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
   --radius: 10px;
+  /* Semantic colour tokens (literal values = current light theme, so this
+     tokenization is a no-op visually; the dark theme overrides them). */
+  --on-accent: #ffffff; /* text on an accent-coloured surface */
+  --danger: #c43c3c; /* discounts, out-of-stock */
+  --danger-soft: #fdecec;
+  --auchan-fg: #c43c3c;
+  --auchan-soft: #fdecec;
+  --silpo-fg: #d96d1f;
+  --silpo-soft: #fff1e6;
+  --overlay: rgba(16, 24, 40, 0.45); /* modal / drawer scrim */
+  --shadow-pop: 0 8px 24px rgba(16, 24, 40, 0.12); /* dropdowns / popovers */
+}
+
+/* Dark theme: overrides the tokens above. Set on <html data-theme="dark"> by an
+   inline script in index.html (before first paint, so there's no flash) and by
+   the in-app toggle. Soft/brand colours are darkened tints; danger/badge text is
+   brightened for contrast against the dark surfaces. */
+[data-theme="dark"] {
+  --bg: #0f141a;
+  --panel: #19202a;
+  --line: #2a323d;
+  --text: #e7eaee;
+  --muted: #98a3af;
+  --accent: #4fae6e;
+  --accent-soft: #15291d;
+  --hover: #222b35;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
+  --on-accent: #0f141a;
+  --danger: #ff7a7a;
+  --danger-soft: #3a2429;
+  --auchan-fg: #ff8585;
+  --auchan-soft: #3a2429;
+  --silpo-fg: #e0a06a;
+  --silpo-soft: #342a1f;
+  --overlay: rgba(0, 0, 0, 0.62);
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+/* Product thumbnails are mostly white-background / transparent images; give them
+   a light tile in dark mode so they read as intentional chips, not glare. */
+[data-theme="dark"] .td-img img,
+[data-theme="dark"] .m-card-head img,
+[data-theme="dark"] .cat-hit img,
+[data-theme="dark"] .alt-item img {
+  background: #eceef1;
+  border-radius: 6px;
+}
+
+/* Theme toggle in the top bar. */
+.theme-toggle {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
 }
 
 * {
@@ -75,7 +137,8 @@ body {
   border-radius: var(--radius);
   font-size: 14px;
   outline: none;
-  background: #fff;
+  background: var(--panel);
+  color: var(--text);
 }
 .search:focus {
   border-color: var(--accent);
@@ -86,15 +149,17 @@ body {
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  background: #fff;
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);
+  box-shadow: var(--shadow-pop);
   z-index: 60;
   padding: 4px;
 }
 .hist-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   text-align: left;
   padding: 9px 10px;
@@ -104,16 +169,31 @@ body {
   font-size: 13px;
   color: var(--text);
   cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .hist-item:hover {
   background: var(--hover);
 }
 .hist-icon {
   color: var(--muted);
-  margin-right: 8px;
+  flex-shrink: 0;
+}
+.hist-q {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Filter context: strongly secondary — small, muted, pushed to the right. */
+.hist-f {
+  margin-left: auto;
+  padding-left: 10px;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.8;
 }
 .hist-clear {
   display: block;
@@ -176,7 +256,7 @@ body {
   text-align: left;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--panel);
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
@@ -190,7 +270,7 @@ body {
 .preset.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .cat-list {
@@ -259,6 +339,8 @@ body {
   border-radius: 7px;
   font-size: 13px;
   outline: none;
+  background: var(--panel);
+  color: var(--text);
 }
 .range-inputs input:focus {
   border-color: var(--accent);
@@ -283,7 +365,7 @@ body {
   color: var(--muted);
 }
 .seg.active {
-  background: #fff;
+  background: var(--panel);
   color: var(--text);
   font-weight: 600;
   box-shadow: var(--shadow);
@@ -370,7 +452,7 @@ body {
 .tr {
   border-bottom: 1px solid var(--line);
   height: 52px;
-  background: #fff;
+  background: var(--panel);
 }
 .tr:hover {
   background: var(--hover);
@@ -402,12 +484,12 @@ body {
   line-height: 16px;
 }
 .store-badge.auchan {
-  background: #fdecec;
-  color: #c43c3c;
+  background: var(--auchan-soft);
+  color: var(--auchan-fg);
 }
 .store-badge.silpo {
-  background: #fff1e6;
-  color: #d96d1f;
+  background: var(--silpo-soft);
+  color: var(--silpo-fg);
 }
 .xstore {
   flex-shrink: 0;
@@ -435,7 +517,7 @@ body {
   line-height: 17px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fff;
+  background: var(--panel);
   color: var(--text);
   cursor: pointer;
 }
@@ -449,7 +531,7 @@ body {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(16, 24, 40, 0.45);
+  background: var(--overlay);
   z-index: 70;
   display: flex;
   align-items: center;
@@ -539,15 +621,38 @@ body {
   border-radius: 4px;
   line-height: 16px;
 }
+/* Discounted price stacks: struck old price on its own line above the new one. */
 .old-price {
+  display: block;
   color: var(--muted);
   font-size: 11px;
   text-decoration: line-through;
-  margin-right: 5px;
+  line-height: 1.15;
 }
 .discount-price {
-  color: #c43c3c;
+  color: var(--danger);
   font-weight: 600;
+}
+
+/* Out-of-stock products are dimmed and tagged so they stand out as unavailable. */
+.tr.out,
+.m-card.out {
+  opacity: 0.5;
+}
+.tr.out:hover {
+  opacity: 0.72;
+}
+.oos {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0 5px;
+  border-radius: 4px;
+  line-height: 16px;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 .td-img {
   display: flex;
@@ -624,7 +729,7 @@ body {
   padding: 7px 14px;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: #fff;
+  background: var(--panel);
   font-size: 13px;
   font-weight: 600;
   color: var(--accent);
@@ -679,7 +784,7 @@ body {
   padding: 7px 13px;
   border-radius: 16px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--panel);
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
@@ -688,7 +793,7 @@ body {
 .chip.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .m-bar {
   display: flex;
@@ -700,7 +805,7 @@ body {
   padding: 9px 14px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fff;
+  background: var(--panel);
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
@@ -712,7 +817,7 @@ body {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fff;
+  background: var(--panel);
   font-size: 16px; /* >=16px so iOS doesn't zoom on focus */
   color: var(--text);
 }
@@ -721,7 +826,7 @@ body {
   width: 40px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fff;
+  background: var(--panel);
   font-size: 15px;
   color: var(--text);
   cursor: pointer;
@@ -738,7 +843,7 @@ body {
   box-sizing: border-box;
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
-  background: #fff;
+  background: var(--panel);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -805,7 +910,7 @@ body {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(16, 24, 40, 0.45);
+  background: var(--overlay);
   z-index: 50;
   display: flex;
   align-items: flex-end;
@@ -866,7 +971,7 @@ body {
 .drawer-clear {
   flex: 0 0 auto;
   padding: 13px 18px;
-  background: #fff;
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -878,7 +983,7 @@ body {
   flex: 1;
   padding: 13px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: 10px;
   font-size: 14px;
@@ -902,7 +1007,7 @@ body {
   padding: 6px 10px 6px 6px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--panel);
   cursor: pointer;
   font-size: 13px;
   color: var(--text);
@@ -941,50 +1046,48 @@ body {
   color: var(--accent);
 }
 
-/* ---- Active filter badges (mobile) ---- */
-.m-badges {
+/* ---- Active-filter bar (above the table, desktop + mobile) ---- */
+.filter-bar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  overflow-x: auto;
-  padding: 0 12px 10px;
-  scrollbar-width: none;
-  /* Fade the trailing edge so an overflowing badge row reads as scrollable
-     (the native scrollbar is hidden). */
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
 }
-.m-badges::-webkit-scrollbar {
-  display: none;
-}
-.m-badge {
-  flex: 0 0 auto;
+.fbadge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 6px 5px 10px;
+  padding: 4px 8px 4px 10px;
   background: var(--accent-soft);
   color: var(--accent);
-  border: none;
+  border: 1px solid transparent;
   border-radius: 14px;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  cursor: pointer;
 }
-.m-badge button {
-  border: none;
-  background: rgba(47, 143, 78, 0.15);
-  color: var(--accent);
-  border-radius: 50%;
-  width: 18px;
-  height: 18px;
+.fbadge:hover {
+  border-color: var(--accent);
+}
+.fbadge-x {
   font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
+  opacity: 0.7;
 }
-.m-badge.more {
-  padding: 5px 10px;
+.fbadge-clear {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
   cursor: pointer;
+  padding: 4px 8px;
+  text-decoration: underline;
+}
+.fbadge-clear:hover {
+  color: var(--text);
 }
 
 @media (max-width: 760px) {

@@ -18,7 +18,8 @@ import type { SearchIndex } from "./search";
 import { buildCrossStore } from "./crossStore";
 import type { CrossStoreInfo } from "./crossStore";
 import { findHealthier } from "./healthier";
-import { FILTERS_KEY, loadJSON, saveJSON, loadHistory, pushHistory, clearHistory } from "./persist";
+import { FILTERS_KEY, loadJSON, saveJSON, loadHistory, pushHistory, clearHistory, saveTheme } from "./persist";
+import type { HistoryEntry, Theme } from "./persist";
 
 type SortKey = "title" | NutrientKey | "price" | "pricePer100" | "pricePerProtein" | "proteinPerKcal";
 type Range = { min: string; max: string };
@@ -30,9 +31,9 @@ const PET_FOOD_CAT = "pets";
 
 type StoreFilter = "all" | StoreId;
 const STORE_OPTIONS: { key: StoreFilter; label: string }[] = [
-  { key: "all", label: "Обидва" },
   { key: "auchan", label: "Ашан" },
   { key: "silpo", label: "Сільпо" },
+  { key: "all", label: "Обидва" },
 ];
 const STORE_BADGE: Record<StoreId, { label: string; cls: string }> = {
   auchan: { label: "Ашан", cls: "store-badge auchan" },
@@ -283,7 +284,7 @@ export default function App() {
 
   const [search, setSearch] = useState(SAVED.search ?? "");
   const [category, setCategory] = useState<string>(SAVED.category ?? "all");
-  const [store, setStore] = useState<StoreFilter>(SAVED.store ?? "all");
+  const [store, setStore] = useState<StoreFilter>(SAVED.store ?? "auchan");
   const [discountOnly, setDiscountOnly] = useState(SAVED.discountOnly ?? false);
   const [cheaperElsewhere, setCheaperElsewhere] = useState(SAVED.cheaperElsewhere ?? false);
   const [basis, setBasis] = useState<Basis>(SAVED.basis ?? "100g");
@@ -299,7 +300,11 @@ export default function App() {
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [altFor, setAltFor] = useState<Product | null>(null);
-  const [history, setHistory] = useState<string[]>(loadHistory);
+  // Initial theme is whatever the no-FOUC inline script already put on <html>.
+  const [theme, setTheme] = useState<Theme>(() =>
+    document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light"
+  );
+  const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
   const [historyOpen, setHistoryOpen] = useState(false);
   // Last query already written to history — dedupes the settle-debounce against
   // Enter/click so the same query isn't persisted twice.
@@ -307,11 +312,20 @@ export default function App() {
 
   const isMobile = useIsMobile();
 
+  // Compact summary of the currently-active filters, stored with a search so the
+  // history dropdown can show what was filtered besides the query text.
+  function currentFilterSummary(): string {
+    const parts: string[] = [];
+    if (store !== "all") parts.push(store === "auchan" ? "Ашан" : "Сільпо");
+    for (const b of activeBadges) parts.push(b.label);
+    return parts.join(" · ");
+  }
+
   const commitToHistory = (raw: string) => {
     const q = raw.trim();
     if (q.length < 2 || q === lastCommittedRef.current) return;
     lastCommittedRef.current = q;
-    setHistory(pushHistory(q));
+    setHistory(pushHistory(q, currentFilterSummary()));
   };
 
   // Persist filter state (debounced — range inputs change on every keystroke).
@@ -335,6 +349,12 @@ export default function App() {
     const t = setTimeout(() => saveJSON(FILTERS_KEY, state), 250);
     return () => clearTimeout(t);
   }, [search, category, store, discountOnly, cheaperElsewhere, basis, inStockOnly, hidePetFood, plausibleOnly, sortKey, sortDir, ranges, minDensity, activePreset]);
+
+  // Reflect theme changes onto <html> and persist the explicit choice.
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    saveTheme(theme);
+  }, [theme]);
 
   // A restored category may no longer exist in a fresh snapshot.
   useEffect(() => {
@@ -542,12 +562,31 @@ export default function App() {
       </div>
     ) : null;
 
+  // Active-filter bar shown above the table: every applied filter as a chip you
+  // can remove one by one (to widen a range / see what's actually filtering),
+  // plus a single "clear all". Lives here so it's visible on desktop and mobile.
+  const filterBar =
+    activeBadges.length > 0 ? (
+      <div className="filter-bar">
+        {activeBadges.map((b) => (
+          <button key={b.key} className="fbadge" onClick={b.clear} title={`Прибрати: ${b.label}`}>
+            {b.label}
+            <span className="fbadge-x">✕</span>
+          </button>
+        ))}
+        <button className="fbadge-clear" onClick={clearFilters}>
+          Очистити все
+        </button>
+      </div>
+    ) : null;
+
   // Healthier same-family alternatives for the product whose panel is open.
   const alternatives = useMemo(() => (altFor ? findHealthier(products, altFor) : []), [altFor, products]);
 
   const historyItems = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return history.filter((h) => h !== search.trim() && (q === "" || h.toLowerCase().includes(q))).slice(0, 8);
+    const trimmed = search.trim();
+    const q = trimmed.toLowerCase();
+    return history.filter((h) => h.q !== trimmed && (q === "" || h.q.toLowerCase().includes(q))).slice(0, 8);
   }, [history, search]);
 
   function toggleSort(key: SortKey) {
@@ -561,6 +600,15 @@ export default function App() {
   }
 
   function applyPreset(preset: Preset) {
+    // Second click on the active scenario toggles it off — clearing only what
+    // the scenario applied (its nutrient ranges + density floor) while keeping
+    // the chosen category and other state intact.
+    if (activePreset === preset.key) {
+      setRanges(emptyRanges());
+      setMinDensity("");
+      setActivePreset(null);
+      return;
+    }
     setRanges(rangesFromPreset(preset));
     setMinDensity(preset.density);
     setSortKey(preset.sortKey);
@@ -674,12 +722,7 @@ export default function App() {
       </section>
 
       <section>
-        <div className="section-head">
-          <h2>Сценарії</h2>
-          <button className="link" onClick={resetFilters}>
-            Скинути
-          </button>
-        </div>
+        <h2>Сценарії</h2>
         <div className="presets">
           {PRESETS.map((p) => (
             <button
@@ -779,7 +822,7 @@ export default function App() {
           <input
             className="search"
             type="search"
-            placeholder="Пошук: назва чи бренд, можна російською…"
+            placeholder="Пошук за назвою або брендом…"
             value={search}
             onChange={(e) => onManualFilterChange(() => setSearch(e.target.value))}
             onFocus={() => setHistoryOpen(true)}
@@ -797,18 +840,19 @@ export default function App() {
             <div className="search-history">
               {historyItems.map((h) => (
                 <button
-                  key={h}
+                  key={h.q}
                   className="hist-item"
                   // mousedown (not click) so it fires before the input's blur
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    onManualFilterChange(() => setSearch(h));
-                    commitToHistory(h);
+                    onManualFilterChange(() => setSearch(h.q));
+                    commitToHistory(h.q);
                     setHistoryOpen(false);
                   }}
                 >
                   <span className="hist-icon">↺</span>
-                  {h}
+                  <span className="hist-q">{h.q}</span>
+                  {h.f && <span className="hist-f">{h.f}</span>}
                 </button>
               ))}
               <button
@@ -823,6 +867,14 @@ export default function App() {
             </div>
           )}
         </div>
+        <button
+          className="theme-toggle"
+          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+          title={theme === "dark" ? "Світла тема" : "Темна тема"}
+          aria-label="Перемкнути тему"
+        >
+          {theme === "dark" ? "☀️" : "🌙"}
+        </button>
       </header>
 
       <div className="layout">
@@ -870,25 +922,10 @@ export default function App() {
                   {sortDir === -1 ? "↓" : "↑"}
                 </button>
               </div>
-              {activeBadges.length > 0 && (
-                <div className="m-badges">
-                  {activeBadges.slice(0, 4).map((b) => (
-                    <span key={b.key} className="m-badge">
-                      {b.label}
-                      <button onClick={b.clear} aria-label={`Прибрати: ${b.label}`}>
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                  {activeBadges.length > 4 && (
-                    <button className="m-badge more" onClick={() => setDrawerOpen(true)}>
-                      +{activeBadges.length - 4}
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
           )}
+
+          {filterBar}
 
           {searchActive && catBlocks.length > 0 ? (
             <div className="cat-hits">
@@ -920,7 +957,7 @@ export default function App() {
                   return (
                     <article
                       key={p.id}
-                      className="m-card"
+                      className={p.inStock ? "m-card" : "m-card out"}
                       style={{
                         position: "absolute",
                         top: 0,
@@ -940,7 +977,10 @@ export default function App() {
                             {p.title}
                           </a>
                           <div className="sub">
-                            <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
+                            {store === "all" && (
+                              <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
+                            )}
+                            {!p.inStock && <span className="oos">немає</span>}
                             <CrossChip info={crossStore.get(p.id)} />
                             <button className="alt-btn" onClick={() => setAltFor(p)} title="Знайти корисніші варіанти">
                               🥗 заміна
@@ -1004,7 +1044,7 @@ export default function App() {
                       return (
                         <div
                           key={p.id}
-                          className="tr"
+                          className={p.inStock ? "tr" : "tr out"}
                           style={{
                             gridTemplateColumns: GRID,
                             position: "absolute",
@@ -1026,7 +1066,10 @@ export default function App() {
                               {p.title}
                             </a>
                             <div className="sub">
-                              <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
+                              {store === "all" && (
+                                <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
+                              )}
+                              {!p.inStock && <span className="oos">немає</span>}
                               <CrossChip info={crossStore.get(p.id)} />
                               <button className="alt-btn" onClick={() => setAltFor(p)} title="Знайти корисніші варіанти">
                                 🥗 заміна

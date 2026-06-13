@@ -64,7 +64,18 @@ npm run preview
 locally, on any static host, and on a GitHub Pages project subpath.
 
 A ready-to-use **GitHub Actions** workflow (`.github/workflows/deploy.yml`)
-re-scrapes periodically and deploys to GitHub Pages.
+re-scrapes **both stores daily** at 09:17 UTC (≈ midday Kyiv — late enough that
+both retailers have rolled over to today's prices/stock, since they update on
+their own non-instant schedules), plus on push and manual dispatch, and deploys
+the fresh snapshot to GitHub Pages — no manual scraping needed. To enable: push
+to GitHub, then Settings → Pages → Source = "GitHub Actions".
+
+The workflow caches `scraper/raw/` (which holds the Silpo per-product nutrition
+cache) between runs via `actions/cache`, so each run only fetches newly-listed
+products instead of re-fetching ~15k Silpo detail pages from cold. The scrape is
+all-or-nothing — `public/data` is republished only when both stores scrape
+cleanly, otherwise the last committed (complete) snapshot is deployed — and the
+job has a 30-minute timeout so a hung run can't stall the pipeline.
 
 ## Features
 
@@ -112,6 +123,10 @@ re-scrapes periodically and deploys to GitHub Pages.
   4·P + 9·F + 4·C vs stated kcal, >50% mismatch hidden).
 - Mobile: filter drawer with instant category apply + auto-close, removable
   active-filter badges, «Очистити» next to «Показати».
+- **Light / dark theme**: follows the OS preference by default, with a header
+  toggle whose choice is persisted. The theme is applied by an inline script in
+  `index.html` before first paint (no flash); all colours are CSS tokens in
+  `:root` overridden under `[data-theme="dark"]`.
 
 ## Performance
 

@@ -1,12 +1,21 @@
 name: Scrape & Deploy
 
-# Re-scrapes the Auchan Lviv catalog and publishes the static site to GitHub Pages.
-# Runs weekly, on push to main, and on manual dispatch.
+# Re-scrapes both stores (Auchan Lviv via zakaz.ua, Silpo Lviv via sf-ecom-api),
+# rebuilds the merged snapshot and publishes the static site to GitHub Pages.
+# Runs daily, on push to main, and on manual dispatch — so the live data
+# (prices, discounts, stock) stays fresh without anyone running the scraper.
 on:
   push:
     branches: [main]
   schedule:
-    - cron: "0 4 */3 * *" # every 3rd day, 04:00 UTC
+    # Daily at 09:17 UTC ≈ 12:17 Kyiv (EEST, summer) / 11:17 (EET, winter).
+    # Deliberately MIDDAY, not pre-open: the two retailers refresh their online
+    # catalogs/promos on their own (different, not-instant) schedules, so a dawn
+    # scrape risks capturing *yesterday's* data. By late morning both stores
+    # have certainly rolled over to today's prices and stock reflects real
+    # availability. The :17 minute avoids the top-of-hour GitHub Actions cron
+    # congestion that delays or drops scheduled runs.
+    - cron: "17 9 * * *"
   workflow_dispatch:
 
 permissions:
@@ -21,15 +30,38 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30 # a hung scrape must not run forever
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
+      # Persist scraper/raw/ (gitignored) across runs. The Silpo scraper caches
+      # per-product nutrition in scraper/raw/silpo.details-cache.json; without
+      # this every CI run would re-fetch ~15k detail pages from a cold cache.
+      # With it, only newly-listed products are fetched, so the scrape stays
+      # fast and within the timeout. The rolling key (+ prefix restore-keys)
+      # always restores the most recent cache and saves an updated one.
+      - name: Restore scraper cache
+        uses: actions/cache@v4
+        with:
+          path: scraper/raw
+          key: scraper-raw-${{ github.run_id }}
+          restore-keys: |
+            scraper-raw-
+
       - run: npm ci
-      - name: Scrape catalog (fall back to committed snapshot on failure)
+
+      # All-or-nothing on purpose: `npm run scrape` chains
+      # scrape:auchan && scrape:silpo && build:data, so public/data is rewritten
+      # only when BOTH stores scrape cleanly. If anything fails we keep the
+      # last committed snapshot (a complete two-store dataset) rather than
+      # publishing a half-store one.
+      - name: Scrape both stores (fall back to committed snapshot on failure)
         run: npm run scrape || echo "scrape failed — deploying last committed snapshot"
+
       - run: npm run build
       - uses: actions/configure-pages@v5
         with:
