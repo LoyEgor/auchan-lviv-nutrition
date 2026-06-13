@@ -39,7 +39,15 @@ export interface Alternative {
   cheaper: boolean | null; // vs source by ₴/100g protein; null if not comparable
 }
 
-export function findHealthier(products: Product[], source: Product, limit = 3): Alternative[] {
+// `storeFilter` mirrors the catalog's store mode: when a single store is
+// selected, only that store's products are offered as replacements (it would be
+// odd to suggest a Silpo item while browsing Auchan).
+export function findHealthier(
+  products: Product[],
+  source: Product,
+  storeFilter: "all" | "auchan" | "silpo" = "all",
+  limit = 5
+): Alternative[] {
   const srcDensity = proteinPerKcal(source);
   if (srcDensity == null || source.kcal == null) return [];
   const srcTokens = sigTokens(source.title, source.brand);
@@ -49,6 +57,7 @@ export function findHealthier(products: Product[], source: Product, limit = 3): 
   const scored: { alt: Alternative; shared: number }[] = [];
   for (const p of products) {
     if (p.id === source.id || p.cat !== source.cat || !p.inStock) continue;
+    if (storeFilter !== "all" && p.store !== storeFilter) continue;
     if (p.kcal == null || p.kcal < MIN_KCAL) continue;
     const d = proteinPerKcal(p);
     if (d == null || d < srcDensity * DENSITY_GAIN) continue;

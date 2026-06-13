@@ -19,7 +19,7 @@ import { buildCrossStore } from "./crossStore";
 import type { CrossStoreInfo } from "./crossStore";
 import { findHealthier } from "./healthier";
 import { FILTERS_KEY, loadJSON, saveJSON, loadHistory, pushHistory, clearHistory, saveTheme } from "./persist";
-import type { HistoryEntry, Theme } from "./persist";
+import type { HistoryEntry, HistoryFilters, Theme } from "./persist";
 
 type SortKey = "title" | NutrientKey | "price" | "pricePer100" | "pricePerProtein" | "proteinPerKcal";
 type Range = { min: string; max: string };
@@ -43,7 +43,7 @@ const STORE_BADGE: Record<StoreId, { label: string; cls: string }> = {
 const ASC_DEFAULT = new Set<SortKey>(["title", "pricePer100", "pricePerProtein"]);
 
 const ROW_H = 52;
-const CARD_H = 148;
+const CARD_H = 156; // 148px card + 8px gap between cards (separation without a line)
 
 interface Column {
   key: SortKey;
@@ -142,6 +142,35 @@ function rangesFromPreset(preset: Preset): Ranges {
   return next;
 }
 
+// Build a full Ranges object from a (possibly partial) stored snapshot.
+function rangesFromSnapshot(stored: HistoryFilters["ranges"]): Ranges {
+  const next = emptyRanges();
+  for (const k of Object.keys(next) as NutrientKey[]) {
+    const r = stored?.[k];
+    if (r) next[k] = { min: r.min ?? "", max: r.max ?? "" };
+  }
+  return next;
+}
+
+// Human-readable label list for a filter snapshot — the SAME wording as the
+// active-filter chips, so the history dropdown shows exactly what will apply.
+function describeFilters(f: HistoryFilters, categories: Category[]): string {
+  const parts: string[] = [];
+  if (f.store !== "all") parts.push(f.store === "auchan" ? "Ашан" : "Сільпо");
+  if (f.category !== "all") parts.push(categories.find((c) => c.id === f.category)?.title ?? "Категорія");
+  if (f.discountOnly) parts.push("Зі знижкою");
+  if (f.cheaperElsewhere) parts.push("Дешевше деінде");
+  if (f.completeOnly) parts.push("Повні дані");
+  if (f.minDensity !== "") parts.push(`Б/100ккал ≥ ${f.minDensity}`);
+  for (const { key, label } of NUTRIENTS) {
+    const r = f.ranges[key];
+    if (!r || (r.min === "" && r.max === "")) continue;
+    const suffix = r.min !== "" && r.max !== "" ? `${r.min}–${r.max}` : r.min !== "" ? `від ${r.min}` : `до ${r.max}`;
+    parts.push(`${label} ${suffix}`);
+  }
+  return parts.join(" · ");
+}
+
 const DEFAULT_PRESET = PRESETS[0];
 
 // ---- Filter-state persistence (validated, restored once at startup) ----
@@ -152,6 +181,7 @@ interface SavedState {
   store: StoreFilter;
   discountOnly: boolean;
   cheaperElsewhere: boolean;
+  completeOnly: boolean;
   basis: Basis;
   inStockOnly: boolean;
   hidePetFood: boolean;
@@ -174,6 +204,7 @@ function sanitizeSaved(raw: unknown): Partial<SavedState> {
   if (r.store === "all" || r.store === "auchan" || r.store === "silpo") out.store = r.store;
   if (typeof r.discountOnly === "boolean") out.discountOnly = r.discountOnly;
   if (typeof r.cheaperElsewhere === "boolean") out.cheaperElsewhere = r.cheaperElsewhere;
+  if (typeof r.completeOnly === "boolean") out.completeOnly = r.completeOnly;
   if (typeof r.inStockOnly === "boolean") out.inStockOnly = r.inStockOnly;
   if (typeof r.hidePetFood === "boolean") out.hidePetFood = r.hidePetFood;
   if (typeof r.plausibleOnly === "boolean") out.plausibleOnly = r.plausibleOnly;
@@ -250,29 +281,34 @@ function hideBrokenImg(e: React.SyntheticEvent<HTMLImageElement>) {
   e.currentTarget.style.visibility = "hidden";
 }
 
-// Cross-store price hint: green savings chip when the same item is cheaper in
-// the other store, a faint marker when this is already the cheapest.
-function CrossChip({ info }: { info: CrossStoreInfo | undefined }) {
+// Cross-store price hint, clickable to open a side-by-side comparison:
+// green when this is the cheapest, red when the same item is cheaper elsewhere,
+// neutral when the prices are level.
+function CrossChip({ info, onOpen }: { info: CrossStoreInfo | undefined; onOpen: () => void }) {
   if (!info) return null;
   if (info.isCheapest) {
     return (
-      <span className="xstore best" title="Найдешевше серед магазинів">
+      <button className="xstore best" onClick={onOpen} title="Найдешевше серед магазинів — натисніть для порівняння">
         ✓ найдешевше
-      </span>
+      </button>
     );
   }
-  // Pricier than the other store, but by < 1% after rounding — call it a tie.
+  // Pricier than the other store, but by < 1% after rounding — call it level.
   if (info.deltaPct < 1) {
     return (
-      <span className="xstore best" title={`Та сама ціна, що в ${STORE_BADGE[info.cheaperStore].label}`}>
-        ≈ {STORE_BADGE[info.cheaperStore].label}
-      </span>
+      <button className="xstore tie" onClick={onOpen} title={`Та сама ціна, що в ${STORE_BADGE[info.otherStore].label}`}>
+        ≈ {STORE_BADGE[info.otherStore].label}
+      </button>
     );
   }
   return (
-    <span className="xstore cheaper" title={`Дешевше в ${STORE_BADGE[info.cheaperStore].label} на ${info.deltaPct}%`}>
-      ↘ {STORE_BADGE[info.cheaperStore].label} −{info.deltaPct}%
-    </span>
+    <button
+      className="xstore cheaper"
+      onClick={onOpen}
+      title={`Дешевше в ${STORE_BADGE[info.otherStore].label} на ${info.deltaPct}% — натисніть для порівняння`}
+    >
+      ↘ {STORE_BADGE[info.otherStore].label} −{info.deltaPct}%
+    </button>
   );
 }
 
@@ -287,6 +323,7 @@ export default function App() {
   const [store, setStore] = useState<StoreFilter>(SAVED.store ?? "auchan");
   const [discountOnly, setDiscountOnly] = useState(SAVED.discountOnly ?? false);
   const [cheaperElsewhere, setCheaperElsewhere] = useState(SAVED.cheaperElsewhere ?? false);
+  const [completeOnly, setCompleteOnly] = useState(SAVED.completeOnly ?? false);
   const [basis, setBasis] = useState<Basis>(SAVED.basis ?? "100g");
   const [inStockOnly, setInStockOnly] = useState(SAVED.inStockOnly ?? true);
   const [hidePetFood, setHidePetFood] = useState(SAVED.hidePetFood ?? true);
@@ -300,6 +337,7 @@ export default function App() {
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [altFor, setAltFor] = useState<Product | null>(null);
+  const [xstoreFor, setXstoreFor] = useState<Product | null>(null);
   // Initial theme is whatever the no-FOUC inline script already put on <html>.
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light"
@@ -312,21 +350,42 @@ export default function App() {
 
   const isMobile = useIsMobile();
 
-  // Compact summary of the currently-active filters, stored with a search so the
-  // history dropdown can show what was filtered besides the query text.
-  function currentFilterSummary(): string {
-    const parts: string[] = [];
-    if (store !== "all") parts.push(store === "auchan" ? "Ашан" : "Сільпо");
-    for (const b of activeBadges) parts.push(b.label);
-    return parts.join(" · ");
-  }
+  // Snapshot of the filters currently applied, stored with a search so history
+  // can both show and re-apply the exact same state.
+  const filterSnapshot = (): HistoryFilters => ({
+    category,
+    store,
+    discountOnly,
+    cheaperElsewhere,
+    completeOnly,
+    minDensity,
+    ranges,
+  });
 
   const commitToHistory = (raw: string) => {
     const q = raw.trim();
     if (q.length < 2 || q === lastCommittedRef.current) return;
     lastCommittedRef.current = q;
-    setHistory(pushHistory(q, currentFilterSummary()));
+    setHistory(pushHistory(q, filterSnapshot()));
   };
+
+  // Restore a past search: its query AND the filters it was saved with, so the
+  // result matches the summary shown in the dropdown.
+  function applyHistory(entry: HistoryEntry) {
+    const f = entry.filters;
+    setSearch(entry.q);
+    setCategory(f.category);
+    setStore(f.store);
+    setDiscountOnly(f.discountOnly);
+    setCheaperElsewhere(f.cheaperElsewhere);
+    setCompleteOnly(f.completeOnly);
+    setMinDensity(f.minDensity);
+    setRanges(rangesFromSnapshot(f.ranges));
+    setActivePreset(null);
+    lastCommittedRef.current = entry.q; // don't let the debounce re-commit it
+    setHistory(pushHistory(entry.q, f)); // promote to top, keeping its own snapshot
+    setHistoryOpen(false);
+  }
 
   // Persist filter state (debounced — range inputs change on every keystroke).
   useEffect(() => {
@@ -336,6 +395,7 @@ export default function App() {
       store,
       discountOnly,
       cheaperElsewhere,
+      completeOnly,
       basis,
       inStockOnly,
       hidePetFood,
@@ -348,7 +408,7 @@ export default function App() {
     };
     const t = setTimeout(() => saveJSON(FILTERS_KEY, state), 250);
     return () => clearTimeout(t);
-  }, [search, category, store, discountOnly, cheaperElsewhere, basis, inStockOnly, hidePetFood, plausibleOnly, sortKey, sortDir, ranges, minDensity, activePreset]);
+  }, [search, category, store, discountOnly, cheaperElsewhere, completeOnly, basis, inStockOnly, hidePetFood, plausibleOnly, sortKey, sortDir, ranges, minDensity, activePreset]);
 
   // Reflect theme changes onto <html> and persist the explicit choice.
   useEffect(() => {
@@ -407,6 +467,17 @@ export default function App() {
     return () => clearTimeout(t);
   }, [products]);
 
+  const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+
+  // The two products shown in the cross-store comparison modal (clicked + twin).
+  const xstorePair = useMemo(() => {
+    if (!xstoreFor) return null;
+    const info = crossStore.get(xstoreFor.id);
+    if (!info) return null;
+    const other = productById.get(info.otherId);
+    return other ? { source: xstoreFor, other, info } : null;
+  }, [xstoreFor, crossStore, productById]);
+
   // One pass produces both the visible list and per-category hit counts (the
   // category filter is applied last, so the counts cover all other filters).
   const { filtered, catHits } = useMemo(() => {
@@ -425,6 +496,7 @@ export default function App() {
       const p = products[i];
       if (store !== "all" && p.store !== store) continue;
       if (discountOnly && p.oldPrice == null) continue;
+      if (completeOnly && (p.kcal == null || p.protein == null || p.fat == null || p.carbs == null)) continue;
       if (cheaperElsewhere) {
         const ci = crossStore.get(p.id);
         if (!ci || ci.isCheapest || ci.deltaPct < 1) continue; // only meaningfully cheaper elsewhere
@@ -454,7 +526,7 @@ export default function App() {
       return compareNullable(sortValue(a, sortKey, basis), sortValue(b, sortKey, basis), sortDir);
     });
     return { filtered: list, catHits };
-  }, [products, searchIndex, crossStore, search, category, store, discountOnly, cheaperElsewhere, inStockOnly, hidePetFood, plausibleOnly, minDensity, ranges, sortKey, sortDir, basis]);
+  }, [products, searchIndex, crossStore, search, category, store, discountOnly, cheaperElsewhere, completeOnly, inStockOnly, hidePetFood, plausibleOnly, minDensity, ranges, sortKey, sortDir, basis]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -466,8 +538,9 @@ export default function App() {
     if (category !== "all") n++;
     if (discountOnly) n++;
     if (cheaperElsewhere) n++;
+    if (completeOnly) n++;
     return n;
-  }, [ranges, minDensity, category, discountOnly, cheaperElsewhere]);
+  }, [ranges, minDensity, category, discountOnly, cheaperElsewhere, completeOnly]);
 
   const searchActive = search.trim().length > 0;
 
@@ -489,6 +562,7 @@ export default function App() {
     }
     if (discountOnly) out.push({ key: "disc", label: "Зі знижкою", clear: () => setDiscountOnly(false) });
     if (cheaperElsewhere) out.push({ key: "cheaper", label: "Дешевше деінде", clear: () => setCheaperElsewhere(false) });
+    if (completeOnly) out.push({ key: "complete", label: "Повні дані", clear: () => setCompleteOnly(false) });
     if (minDensity !== "") {
       out.push({
         key: "dens",
@@ -513,7 +587,7 @@ export default function App() {
       });
     }
     return out;
-  }, [category, categories, discountOnly, cheaperElsewhere, minDensity, ranges]);
+  }, [category, categories, discountOnly, cheaperElsewhere, completeOnly, minDensity, ranges]);
 
   // When a search returns nothing, tell apart a misspelled term (→ offer
   // spelling suggestions) from over-tight filters (→ offer to clear them).
@@ -580,13 +654,19 @@ export default function App() {
       </div>
     ) : null;
 
-  // Healthier same-family alternatives for the product whose panel is open.
-  const alternatives = useMemo(() => (altFor ? findHealthier(products, altFor) : []), [altFor, products]);
+  // Healthier same-family alternatives for the product whose panel is open —
+  // scoped to the current store mode, up to 5.
+  const alternatives = useMemo(
+    () => (altFor ? findHealthier(products, altFor, store, 5) : []),
+    [altFor, products, store]
+  );
 
+  // Recent searches shown whenever the input is focused — including while text
+  // is entered — so the dropdown is a stable "jump back" list, not a typeahead.
+  // Only the exact current query is dropped (no point re-suggesting it).
   const historyItems = useMemo(() => {
     const trimmed = search.trim();
-    const q = trimmed.toLowerCase();
-    return history.filter((h) => h.q !== trimmed && (q === "" || h.q.toLowerCase().includes(q))).slice(0, 8);
+    return history.filter((h) => h.q !== trimmed).slice(0, 8);
   }, [history, search]);
 
   function toggleSort(key: SortKey) {
@@ -621,6 +701,7 @@ export default function App() {
     setCategory("all");
     setDiscountOnly(false);
     setCheaperElsewhere(false);
+    setCompleteOnly(false);
     setRanges(emptyRanges());
     setMinDensity("");
     setActivePreset(null);
@@ -801,6 +882,10 @@ export default function App() {
           <input type="checkbox" checked={plausibleOnly} onChange={(e) => setPlausibleOnly(e.target.checked)} />
           Лише правдоподібні дані
         </label>
+        <label className="checkbox" title="Лише товари, де заповнені всі чотири значення: ккал, білки, жири, вуглеводи">
+          <input type="checkbox" checked={completeOnly} onChange={(e) => setCompleteOnly(e.target.checked)} />
+          Лише з повними даними
+        </label>
       </section>
     </>
   );
@@ -811,7 +896,7 @@ export default function App() {
         <div className="brand">
           <span className="logo">🥦</span>
           <div>
-            <h1>Каталог за КБЖУ · Львів</h1>
+            <h1>Каталог за КБЖВ · Львів</h1>
             <p className="muted">
               {meta.stores.map((s) => s.title).join(" + ")} · {meta.totalKept.toLocaleString("uk-UA")} товарів ·
               оновлено {new Date(meta.generatedAt).toLocaleDateString("uk-UA")}
@@ -838,23 +923,25 @@ export default function App() {
           />
           {historyOpen && historyItems.length > 0 && (
             <div className="search-history">
-              {historyItems.map((h) => (
-                <button
-                  key={h.q}
-                  className="hist-item"
-                  // mousedown (not click) so it fires before the input's blur
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    onManualFilterChange(() => setSearch(h.q));
-                    commitToHistory(h.q);
-                    setHistoryOpen(false);
-                  }}
-                >
-                  <span className="hist-icon">↺</span>
-                  <span className="hist-q">{h.q}</span>
-                  {h.f && <span className="hist-f">{h.f}</span>}
-                </button>
-              ))}
+              {historyItems.map((h) => {
+                const summary = describeFilters(h.filters, categories);
+                return (
+                  <button
+                    key={h.q}
+                    className="hist-item"
+                    // mousedown (not click) so it fires before the input's blur
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setActivePreset(null);
+                      applyHistory(h);
+                    }}
+                  >
+                    <span className="hist-icon">↺</span>
+                    <span className="hist-q">{h.q}</span>
+                    {summary && <span className="hist-f">{summary}</span>}
+                  </button>
+                );
+              })}
               <button
                 className="hist-clear"
                 onMouseDown={(e) => {
@@ -981,7 +1068,7 @@ export default function App() {
                               <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
                             )}
                             {!p.inStock && <span className="oos">немає</span>}
-                            <CrossChip info={crossStore.get(p.id)} />
+                            <CrossChip info={crossStore.get(p.id)} onOpen={() => setXstoreFor(p)} />
                             <button className="alt-btn" onClick={() => setAltFor(p)} title="Знайти корисніші варіанти">
                               🥗 заміна
                             </button>
@@ -1070,7 +1157,7 @@ export default function App() {
                                 <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
                               )}
                               {!p.inStock && <span className="oos">немає</span>}
-                              <CrossChip info={crossStore.get(p.id)} />
+                              <CrossChip info={crossStore.get(p.id)} onOpen={() => setXstoreFor(p)} />
                               <button className="alt-btn" onClick={() => setAltFor(p)} title="Знайти корисніші варіанти">
                                 🥗 заміна
                               </button>
@@ -1145,13 +1232,15 @@ export default function App() {
                     Б/100ккал <b>{fmt(proteinPerKcal(altFor))}</b>
                   </span>
                   <span>{fmt(altFor.kcal, 0)} ккал</span>
-                  <span>{fmtPrice(pricePer100g(altFor))}/100г</span>
+                  <span>{fmtPrice(pricePerProtein(altFor))}/100гБ</span>
                 </div>
               </div>
 
               {alternatives.length > 0 ? (
                 <>
-                  <p className="muted alt-hint">Більше білка на калорію у тій самій категорії:</p>
+                  <p className="muted alt-hint">
+                    Той самий вид їжі, але більше білка на калорію (вищий Б/100ккал) — ситніше за ту саму калорійність:
+                  </p>
                   <ul className="alt-list">
                     {alternatives.map((a) => (
                       <li key={a.product.id} className="alt-item">
@@ -1168,6 +1257,7 @@ export default function App() {
                             <span className={STORE_BADGE[a.product.store].cls}>{STORE_BADGE[a.product.store].label}</span>
                             <span className="alt-density">Б/100ккал {fmt(a.density)}</span>
                             <span>{fmt(a.product.kcal, 0)} ккал</span>
+                            <span>{fmtPrice(pricePerProtein(a.product))}/100гБ</span>
                             {a.cheaper === true && <span className="alt-cheaper">дешевший білок</span>}
                           </div>
                         </div>
@@ -1178,6 +1268,57 @@ export default function App() {
               ) : (
                 <p className="muted alt-hint">Це вже один із найбілковіших варіантів у своїй категорії.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {xstorePair && (
+        <div className="modal-backdrop" onClick={() => setXstoreFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-head">
+              <strong>Той самий товар в іншому магазині</strong>
+              <button className="drawer-close" onClick={() => setXstoreFor(null)} aria-label="Закрити">
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="muted alt-hint">
+                {xstorePair.info.isCheapest
+                  ? `Тут найдешевше за 100 г — у ${STORE_BADGE[xstorePair.info.otherStore].label} дорожче`
+                  : `Дешевше в ${STORE_BADGE[xstorePair.info.otherStore].label} на ${xstorePair.info.deltaPct}% за 100 г`}
+              </p>
+              <ul className="alt-list">
+                {[xstorePair.source, xstorePair.other].map((pr) => {
+                  const per = pricePer100g(pr);
+                  const a = pricePer100g(xstorePair.source);
+                  const b = pricePer100g(xstorePair.other);
+                  const cheaper = per != null && a != null && b != null && per <= Math.min(a, b);
+                  return (
+                    <li key={pr.id} className={cheaper ? "alt-item xs-best" : "alt-item"}>
+                      {pr.img ? (
+                        <img src={pr.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                      ) : (
+                        <div className="noimg" />
+                      )}
+                      <div className="alt-item-main">
+                        <a href={pr.url ?? "#"} target="_blank" rel="noreferrer" className="ttl">
+                          {pr.title}
+                        </a>
+                        <div className="alt-item-sub">
+                          <span className={STORE_BADGE[pr.store].cls}>{STORE_BADGE[pr.store].label}</span>
+                          <span className={cheaper ? "alt-density" : undefined}>{fmtPrice(per)}/100г</span>
+                          <span>
+                            {fmtPrice(pr.price)}
+                            {(pr.unit === "kg" || pr.unit === "l") && ` / ${pr.unit === "kg" ? "кг" : "л"}`}
+                          </span>
+                          <span className="weight">{fmtWeight(pr)}</span>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-# Каталог за КБЖУ · Ашан і Сільпо (Львів)
+# Каталог за КБЖВ · Ашан і Сільпо (Львів)
 
 A rebuilt grocery catalog of **Auchan Lviv DRIVE** (zakaz.ua) and a **Silpo Lviv**
 branch that lets you **search, filter and sort the combined assortment by

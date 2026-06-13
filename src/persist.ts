@@ -2,7 +2,7 @@
 // disabled cookies) or full — every operation degrades to a no-op then.
 
 export const FILTERS_KEY = "food.filters.v1";
-const HISTORY_KEY = "food.history.v1";
+const HISTORY_KEY = "food.history.v2";
 const HISTORY_MAX = 10;
 
 // Theme is stored as a raw string ("light"/"dark"), NOT JSON, so the no-FOUC
@@ -43,11 +43,43 @@ export function saveJSON(key: string, value: unknown): void {
   }
 }
 
-// A past search: the query plus a short, human-readable summary of the filters
-// that were active when it was run ("" when none).
+// A past search: the query plus a SNAPSHOT of the filters that were active when
+// it ran. The snapshot is both shown in the dropdown and re-applied on click, so
+// what you see in history is exactly what you get — no drift between the two.
+export interface HistoryFilters {
+  category: string;
+  store: "all" | "auchan" | "silpo";
+  discountOnly: boolean;
+  cheaperElsewhere: boolean;
+  completeOnly: boolean;
+  minDensity: string;
+  ranges: Record<string, { min: string; max: string }>;
+}
 export interface HistoryEntry {
   q: string;
-  f: string;
+  filters: HistoryFilters;
+}
+
+function sanitizeFilters(raw: unknown): HistoryFilters {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const ranges: HistoryFilters["ranges"] = {};
+  if (r.ranges && typeof r.ranges === "object") {
+    for (const [k, v] of Object.entries(r.ranges as Record<string, unknown>)) {
+      if (v && typeof v === "object") {
+        const { min, max } = v as Record<string, unknown>;
+        ranges[k] = { min: typeof min === "string" ? min : "", max: typeof max === "string" ? max : "" };
+      }
+    }
+  }
+  return {
+    category: typeof r.category === "string" ? r.category : "all",
+    store: r.store === "auchan" || r.store === "silpo" ? r.store : "all",
+    discountOnly: r.discountOnly === true,
+    cheaperElsewhere: r.cheaperElsewhere === true,
+    completeOnly: r.completeOnly === true,
+    minDensity: typeof r.minDensity === "string" ? r.minDensity : "",
+    ranges,
+  };
 }
 
 export function loadHistory(): HistoryEntry[] {
@@ -55,19 +87,17 @@ export function loadHistory(): HistoryEntry[] {
   if (!Array.isArray(raw)) return [];
   const out: HistoryEntry[] = [];
   for (const x of raw) {
-    // Tolerate the older string-only shape so existing history isn't lost.
-    if (typeof x === "string") out.push({ q: x, f: "" });
-    else if (x && typeof x === "object" && typeof (x as any).q === "string") {
-      out.push({ q: (x as any).q, f: typeof (x as any).f === "string" ? (x as any).f : "" });
+    if (x && typeof x === "object" && typeof (x as any).q === "string") {
+      out.push({ q: (x as any).q, filters: sanitizeFilters((x as any).filters) });
     }
   }
   return out.slice(0, HISTORY_MAX);
 }
 
 // Most-recent-first, deduplicated by query, capped. Returns the updated list.
-export function pushHistory(query: string, filters = ""): HistoryEntry[] {
+export function pushHistory(query: string, filters: HistoryFilters): HistoryEntry[] {
   const q = query.trim();
-  const next = [{ q, f: filters }, ...loadHistory().filter((h) => h.q !== q)].slice(0, HISTORY_MAX);
+  const next = [{ q, filters }, ...loadHistory().filter((h) => h.q !== q)].slice(0, HISTORY_MAX);
   saveJSON(HISTORY_KEY, next);
   return next;
 }

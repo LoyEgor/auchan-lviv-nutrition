@@ -96,10 +96,10 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 export interface CrossStoreInfo {
-  cheaperStore: StoreId; // store with the lowest price-per-100g in the cluster
-  cheaperPricePer100: number;
-  deltaPct: number; // how much more THIS product costs vs the cheapest (0 if it is cheapest)
-  isCheapest: boolean;
+  otherStore: StoreId; // the OTHER store this product is compared against
+  otherId: string; // id of the equivalent product in that other store (for the modal)
+  deltaPct: number; // how much more THIS product costs vs the other-store equivalent (0 if cheapest)
+  isCheapest: boolean; // true when this product is the cheaper (or tied) side
 }
 
 interface Node {
@@ -162,8 +162,9 @@ export function buildCrossStore(products: Product[]): Map<string, CrossStoreInfo
       const clusterStores = new Set(priced.map((n) => n.product.store));
       if (priced.length < 2 || clusterStores.size < 2) continue;
 
-      // Cheapest per-100g price within each store, plus the global spread.
-      const perStoreMin = new Map<StoreId, { store: StoreId; per100: number }>();
+      // Cheapest NODE per store (keep the product, not just the price), plus the
+      // global spread.
+      const perStoreMin = new Map<StoreId, Node>();
       let minPer100 = Infinity;
       let maxPer100 = 0;
       for (const n of priced) {
@@ -171,25 +172,27 @@ export function buildCrossStore(products: Product[]): Map<string, CrossStoreInfo
         if (v < minPer100) minPer100 = v;
         if (v > maxPer100) maxPer100 = v;
         const cur = perStoreMin.get(n.product.store);
-        if (!cur || v < cur.per100) perStoreMin.set(n.product.store, { store: n.product.store, per100: v });
+        if (!cur || v < (cur.per100 as number)) perStoreMin.set(n.product.store, n);
       }
       // Implausible spread → untrustworthy match; emit nothing for this cluster.
       if (minPer100 <= 0 || maxPer100 / minPer100 > MAX_CLUSTER_RATIO) continue;
 
-      // Each product is compared against the BEST price in any OTHER store, so
-      // the hint always points across stores (never "cheaper in my own store").
+      // Each product is compared against the cheapest equivalent in any OTHER
+      // store, so the hint (and the modal it opens) always points across stores.
       for (const n of priced) {
         const mine = n.per100 as number;
-        let other: { store: StoreId; per100: number } | null = null;
+        let other: Node | null = null;
         for (const m of perStoreMin.values()) {
-          if (m.store !== n.product.store && (!other || m.per100 < other.per100)) other = m;
+          if (m.product.store !== n.product.store && (!other || (m.per100 as number) < (other.per100 as number))) other = m;
         }
         if (!other) continue;
-        if (mine <= other.per100) {
-          result.set(n.product.id, { cheaperStore: n.product.store, cheaperPricePer100: mine, deltaPct: 0, isCheapest: true });
+        const otherPer100 = other.per100 as number;
+        const base = { otherStore: other.product.store, otherId: other.product.id };
+        if (mine <= otherPer100) {
+          result.set(n.product.id, { ...base, deltaPct: 0, isCheapest: true });
         } else {
-          const deltaPct = Math.round(((mine - other.per100) / other.per100) * 100);
-          result.set(n.product.id, { cheaperStore: other.store, cheaperPricePer100: other.per100, deltaPct, isCheapest: false });
+          const deltaPct = Math.round(((mine - otherPer100) / otherPer100) * 100);
+          result.set(n.product.id, { ...base, deltaPct, isCheapest: false });
         }
       }
     }

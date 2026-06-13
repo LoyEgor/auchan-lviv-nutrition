@@ -36,7 +36,10 @@ describe("buildCrossStore", () => {
     expect(map.has(a.id)).toBe(true);
     expect(map.has(s.id)).toBe(true);
     expect(map.get(s.id)!.isCheapest).toBe(true);
-    expect(map.get(a.id)!.cheaperStore).toBe("silpo");
+    expect(map.get(a.id)!.otherStore).toBe("silpo");
+    // each points at the other's product so the modal can show the twin
+    expect(map.get(a.id)!.otherId).toBe(s.id);
+    expect(map.get(s.id)!.otherId).toBe(a.id);
     // 63.9/180*100 = 35.5 vs 54.5/180*100 = 30.3 → ~17% more
     expect(map.get(a.id)!.deltaPct).toBeGreaterThan(10);
     expect(map.get(s.id)!.deltaPct).toBe(0);
@@ -90,7 +93,7 @@ describe("buildCrossStore", () => {
     const map = buildCrossStore([a, s]);
     expect(map.size).toBe(2);
     expect(map.get(s.id)!.isCheapest).toBe(true);
-    expect(map.get(a.id)!.cheaperStore).toBe("silpo");
+    expect(map.get(a.id)!.otherStore).toBe("silpo");
   });
 
   it("skips products without a comparable price", () => {

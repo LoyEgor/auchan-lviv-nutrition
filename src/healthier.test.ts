@@ -45,6 +45,15 @@ describe("findHealthier", () => {
     expect(alts).toEqual([]);
   });
 
+  it("respects the store mode (single store suggests only that store)", () => {
+    const source = product({ store: "auchan", title: "Йогурт полуничний", kcal: 90, protein: 4 });
+    const leanSilpo = product({ store: "silpo", title: "Йогурт протеїновий натуральний", kcal: 60, protein: 10 });
+    // store mode = Auchan only → the leaner Silpo item must not be offered
+    expect(findHealthier([source, leanSilpo], source, "auchan")).toEqual([]);
+    // both stores → it is offered
+    expect(findHealthier([source, leanSilpo], source, "all").map((a) => a.product.id)).toContain(leanSilpo.id);
+  });
+
   it("does not suggest items outside the category", () => {
     const source = product({ title: "Йогурт полуничний", kcal: 90, protein: 4 });
     const otherCat = product({ title: "Йогурт соєвий", cat: "healthy", kcal: 50, protein: 9 });
