@@ -138,10 +138,7 @@ textarea {
   font: inherit;
 }
 .preset,
-.chip,
 .m-filters-btn,
-.m-sort,
-.m-dir,
 .suggest-chip,
 .alt-btn {
   border: none;
@@ -171,7 +168,7 @@ input:focus:not(:focus-visible) {
   gap: 8px;
   padding: 12px 20px;
   background: var(--panel);
-  box-shadow: var(--shadow);
+  border-bottom: 1px solid var(--hairline);
   z-index: 2;
   flex-wrap: wrap;
 }
@@ -219,6 +216,22 @@ input:focus:not(:focus-visible) {
 }
 .search:focus {
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+/* Result count as a muted suffix inside the search field (mobile browse mode);
+   hidden the instant the field is focused or a query is typed. */
+.search-count {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  /* Opaque fill matching the input masks any placeholder text behind it. */
+  background: var(--bg);
+  padding-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
 }
 .search-history {
   position: absolute;
@@ -423,6 +436,10 @@ input:focus:not(:focus-visible) {
   padding: 2px;
   margin-bottom: 12px;
 }
+/* Store selector is the only content of its section — drop the trailing gap. */
+.store-toggle {
+  margin-bottom: 0;
+}
 .seg {
   flex: 1;
   border: none;
@@ -528,6 +545,9 @@ input:focus:not(:focus-visible) {
 }
 .tr:hover {
   background: var(--hover);
+  /* Lift the hovered row above the other virtual rows (each has a transform, so
+     each is its own stacking context) so its image hover-peek paints on top. */
+  z-index: 5;
 }
 .td {
   padding: 6px 8px;
@@ -589,21 +609,71 @@ input:focus:not(:focus-visible) {
   color: var(--muted);
   font-weight: 500;
 }
+/* Replace/alternatives action — same swap glyph (⇄) and accent treatment as the
+   mobile card's .m-replace, just inline in the desktop row. */
 .alt-btn {
   flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 0 7px;
-  line-height: 17px;
-  border-radius: 9px;
-  background: var(--panel);
-  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--accent);
   cursor: pointer;
 }
 .alt-btn:hover {
-  border-color: var(--accent);
   background: var(--hover);
-  color: var(--accent);
+}
+
+/* ---- Image lightbox (mobile: tap a product photo) ---- */
+.img-zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+}
+.img-zoom {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+}
+.img-zoom img {
+  max-width: min(90vw, 460px);
+  max-height: 68vh;
+  object-fit: contain;
+  background: #fff; /* product PNGs are cut-outs — a white card keeps them readable */
+  border-radius: 12px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+.img-zoom figcaption {
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  max-width: min(90vw, 460px);
+}
+.img-zoom-close {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
 }
 
 /* ---- Healthier-alternative modal ---- */
@@ -746,15 +816,35 @@ input:focus:not(:focus-visible) {
   color: var(--danger);
 }
 .td-img {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 4px;
+  cursor: zoom-in;
+  overflow: visible; /* override .td overflow:hidden so the hover-peek can escape the cell */
 }
 .td-img img {
   width: 40px;
   height: 40px;
   object-fit: contain;
+}
+/* Hover peek: pop the (already loaded) thumbnail to 200×200. Changing width/
+   height re-rasterises from the source — crisp — unlike transform:scale. The
+   thumbnail is ~200–300px, so 200×200 is native/downscaled, never blurry. */
+.td-img:hover img {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 200px;
+  height: 200px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  z-index: 20;
 }
 .noimg {
   width: 40px;
@@ -853,67 +943,47 @@ input:focus:not(:focus-visible) {
   }
 }
 
-/* ---- Mobile controls (chips + filter/sort bar) ---- */
-.m-controls {
-  padding-top: 4px;
-  background: var(--panel);
-}
-.chips {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 10px 12px 4px;
-  scrollbar-width: none;
-}
-.chips::-webkit-scrollbar {
-  display: none;
-}
-.chip {
-  flex: 0 0 auto;
-  padding: 7px 13px;
-  border-radius: 16px;
-  background: var(--bg);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-  cursor: pointer;
-}
-.chip.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-}
-.m-bar {
-  display: flex;
-  gap: 8px;
-  padding: 8px 12px 10px;
-}
+/* ---- Mobile chrome: compact filter button (in the top bar) + sort pill ---- */
 .m-filters-btn {
   flex: 0 0 auto;
-  padding: 9px 14px;
+  height: 38px;
+  padding: 0 12px;
   border-radius: 9px;
   background: var(--bg);
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
+  white-space: nowrap;
   cursor: pointer;
+}
+/* Inline sort under the search (mobile): dropdown + direction toggle. Sits below
+   the sticky topbar and scrolls away with the page; filters live on the topbar
+   "Фільтри" button. */
+.m-sort-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--panel);
 }
 .m-sort {
   flex: 1;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 9px 10px;
+  border: none;
   border-radius: 9px;
   background: var(--bg);
+  font: inherit;
   font-size: 13px;
   color: var(--text);
   cursor: pointer;
 }
 .m-dir {
   flex: 0 0 auto;
-  width: 40px;
+  width: 44px;
+  border: none;
   border-radius: 9px;
   background: var(--bg);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text);
   cursor: pointer;
 }
@@ -929,6 +999,7 @@ input:focus:not(:focus-visible) {
 /* Floating cards: separated by whitespace + a soft shadow instead of a divider
    line (the card surface barely differs from the page, so the shadow carries it). */
 .m-card {
+  position: relative;
   height: 148px;
   box-sizing: border-box;
   padding: 10px 12px;
@@ -937,7 +1008,7 @@ input:focus:not(:focus-visible) {
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   overflow: hidden;
 }
 .m-card-head {
@@ -945,16 +1016,60 @@ input:focus:not(:focus-visible) {
   gap: 10px;
   min-height: 0;
 }
+/* Image button (tap to open the full-size lightbox) — carries the small store
+   badge overlaid in its corner. */
+.m-img {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.m-img:disabled {
+  cursor: default;
+}
 .m-card-head img,
 .m-card-head .noimg {
   width: 48px;
   height: 48px;
   object-fit: contain;
-  flex-shrink: 0;
   border-radius: 6px;
+}
+.store-badge.on-img {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 3px;
+  line-height: 13px;
+  border-radius: 4px 0 4px 0;
+}
+/* Replace/alternatives action: a swap glyph in the card's top-right corner. */
+.m-replace {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.m-replace:hover {
+  background: var(--hover);
 }
 .m-card-title {
   min-width: 0;
+  padding-right: 26px; /* clear the corner replace button */
 }
 .m-card-title .ttl {
   white-space: normal;
@@ -1176,28 +1291,53 @@ input:focus:not(:focus-visible) {
 }
 
 @media (max-width: 760px) {
+  /* Mobile scrolls the DOCUMENT (window-virtualized cards) so iOS Safari can
+     collapse its bottom toolbar and reclaim that height. Let the page grow with
+     content instead of locking to a fixed-height inner scroller. */
+  html,
+  body,
+  #root {
+    height: auto;
+  }
   .app {
-    height: 100dvh;
+    height: auto;
+    min-height: 100svh;
   }
   .layout {
     grid-template-columns: 1fr;
   }
+  /* Search stays pinned while presets/badges/count scroll away with the page. */
   .topbar {
-    padding: 10px 12px;
+    position: sticky;
+    top: 0;
+    padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+    border-bottom: none;
   }
   .brand {
     display: none; /* hide logo + Auchan title/meta on mobile */
   }
   .search-wrap {
     max-width: none;
+    min-width: 0;
     margin-left: 0;
   }
+  /* Right padding clears the trailing result-count suffix (hidden while typing). */
   .search {
-    padding: 9px 12px;
+    padding: 8px max(64px, env(safe-area-inset-right)) 8px 12px;
   }
   .results-head {
     padding: 8px 12px;
     font-size: 12px;
+  }
+  .filter-bar {
+    padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+  }
+  /* No inner scroller on mobile — cards flow in the document. Bottom padding
+     clears the home indicator; left/right clear the notch in landscape. */
+  .cards-scroll {
+    overflow: visible;
+    padding: 6px max(10px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
   }
   .cat-hits {
     flex-wrap: nowrap;

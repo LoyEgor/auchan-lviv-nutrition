@@ -53,6 +53,8 @@ export interface HistoryFilters {
   cheaperElsewhere: boolean;
   completeOnly: boolean;
   minDensity: string;
+  minPrice: string;
+  maxPrice: string;
   ranges: Record<string, { min: string; max: string }>;
 }
 export interface HistoryEntry {
@@ -78,6 +80,8 @@ function sanitizeFilters(raw: unknown): HistoryFilters {
     cheaperElsewhere: r.cheaperElsewhere === true,
     completeOnly: r.completeOnly === true,
     minDensity: typeof r.minDensity === "string" ? r.minDensity : "",
+    minPrice: typeof r.minPrice === "string" ? r.minPrice : "",
+    maxPrice: typeof r.maxPrice === "string" ? r.maxPrice : "",
     ranges,
   };
 }

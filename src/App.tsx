@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { Product, Category, Meta, NutrientKey, Basis, StoreId } from "./types";
 import {
   nutrientValue,
@@ -40,6 +40,8 @@ const STORE_BADGE: Record<StoreId, { label: string; cls: string }> = {
   silpo: { label: "Сільпо", cls: "store-badge silpo" },
 };
 const LOGO_SRC = `${import.meta.env.BASE_URL}images/silpo-auchan-logo.svg`;
+// Same wordmark with the dark "Львів" recoloured white, for the dark theme.
+const LOGO_SRC_DARK = `${import.meta.env.BASE_URL}images/silpo-auchan-logo-dark.svg`;
 // Ascending is "better" for these (cheaper / text); numbers default to descending.
 const ASC_DEFAULT = new Set<SortKey>(["title", "pricePer100", "pricePerProtein"]);
 
@@ -163,6 +165,15 @@ function describeFilters(f: HistoryFilters, categories: Category[]): string {
   if (f.cheaperElsewhere) parts.push("Дешевше деінде");
   if (f.completeOnly) parts.push("Повні дані");
   if (f.minDensity !== "") parts.push(`Б/100ккал ≥ ${f.minDensity}`);
+  if (f.minPrice !== "" || f.maxPrice !== "") {
+    const suffix =
+      f.minPrice !== "" && f.maxPrice !== ""
+        ? `${f.minPrice}–${f.maxPrice}`
+        : f.minPrice !== ""
+          ? `від ${f.minPrice}`
+          : `до ${f.maxPrice}`;
+    parts.push(`Ціна ${suffix} ₴`);
+  }
   for (const { key, label } of NUTRIENTS) {
     const r = f.ranges[key];
     if (!r || (r.min === "" && r.max === "")) continue;
@@ -191,6 +202,8 @@ interface SavedState {
   sortDir: 1 | -1;
   ranges: Ranges;
   minDensity: string;
+  minPrice: string;
+  maxPrice: string;
   activePreset: string | null;
 }
 
@@ -213,6 +226,8 @@ function sanitizeSaved(raw: unknown): Partial<SavedState> {
   if (SORT_KEYS.has(r.sortKey as SortKey)) out.sortKey = r.sortKey as SortKey;
   if (r.sortDir === 1 || r.sortDir === -1) out.sortDir = r.sortDir;
   if (typeof r.minDensity === "string") out.minDensity = r.minDensity;
+  if (typeof r.minPrice === "string") out.minPrice = r.minPrice;
+  if (typeof r.maxPrice === "string") out.maxPrice = r.maxPrice;
   // null = explicit manual mode (keep). A preset key that no longer exists
   // (removed in an update) also collapses to manual mode rather than silently
   // snapping to the default preset, which would mismatch the restored ranges.
@@ -322,12 +337,15 @@ export default function App() {
   const [sortDir, setSortDir] = useState<1 | -1>(SAVED.sortDir ?? DEFAULT_PRESET.sortDir);
   const [ranges, setRanges] = useState<Ranges>(() => SAVED.ranges ?? rangesFromPreset(DEFAULT_PRESET));
   const [minDensity, setMinDensity] = useState(SAVED.minDensity ?? DEFAULT_PRESET.density);
+  const [minPrice, setMinPrice] = useState(SAVED.minPrice ?? "");
+  const [maxPrice, setMaxPrice] = useState(SAVED.maxPrice ?? "");
   const [activePreset, setActivePreset] = useState<string | null>(
     SAVED.activePreset !== undefined ? SAVED.activePreset : DEFAULT_PRESET.key
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [altFor, setAltFor] = useState<Product | null>(null);
   const [xstoreFor, setXstoreFor] = useState<Product | null>(null);
+  const [zoomImg, setZoomImg] = useState<Product | null>(null);
   // Initial theme is whatever the no-FOUC inline script already put on <html>.
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light"
@@ -349,6 +367,8 @@ export default function App() {
     cheaperElsewhere,
     completeOnly,
     minDensity,
+    minPrice,
+    maxPrice,
     ranges,
   });
 
@@ -370,6 +390,8 @@ export default function App() {
     setCheaperElsewhere(f.cheaperElsewhere);
     setCompleteOnly(f.completeOnly);
     setMinDensity(f.minDensity);
+    setMinPrice(f.minPrice);
+    setMaxPrice(f.maxPrice);
     setRanges(rangesFromSnapshot(f.ranges));
     setActivePreset(null);
     lastCommittedRef.current = entry.q; // don't let the debounce re-commit it
@@ -394,11 +416,13 @@ export default function App() {
       sortDir,
       ranges,
       minDensity,
+      minPrice,
+      maxPrice,
       activePreset,
     };
     const t = setTimeout(() => saveJSON(FILTERS_KEY, state), 250);
     return () => clearTimeout(t);
-  }, [search, category, store, discountOnly, cheaperElsewhere, completeOnly, basis, inStockOnly, hidePetFood, plausibleOnly, sortKey, sortDir, ranges, minDensity, activePreset]);
+  }, [search, category, store, discountOnly, cheaperElsewhere, completeOnly, basis, inStockOnly, hidePetFood, plausibleOnly, sortKey, sortDir, ranges, minDensity, minPrice, maxPrice, activePreset]);
 
   // Reflect theme changes onto <html> and persist the explicit choice.
   useEffect(() => {
@@ -420,6 +444,7 @@ export default function App() {
         setAltFor(null);
         setXstoreFor(null);
         setDrawerOpen(false);
+        setZoomImg(null);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -433,7 +458,7 @@ export default function App() {
     const t = setTimeout(() => commitToHistory(search), 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, category, store, discountOnly, cheaperElsewhere, completeOnly, minDensity, ranges]);
+  }, [search, category, store, discountOnly, cheaperElsewhere, completeOnly, minDensity, minPrice, maxPrice, ranges]);
 
   useEffect(() => {
     const base = import.meta.env.BASE_URL;
@@ -515,6 +540,18 @@ export default function App() {
     [ranges]
   );
 
+  // Parsed price range (on canonical ₴/100 g), recomputed only when its inputs
+  // change. Accepts a comma decimal separator (uk locale) as well as a dot.
+  const priceNums = useMemo(() => {
+    const parse = (s: string) => (s === "" ? null : parseFloat(s.replace(",", ".")));
+    const lo = parse(minPrice);
+    const hi = parse(maxPrice);
+    return {
+      min: Number.isFinite(lo as number) ? (lo as number) : null,
+      max: Number.isFinite(hi as number) ? (hi as number) : null,
+    };
+  }, [minPrice, maxPrice]);
+
   // One pass produces both the visible list and per-category hit counts (the
   // category filter is applied last, so the counts cover all other filters).
   const { filtered, catHits } = useMemo(() => {
@@ -538,6 +575,12 @@ export default function App() {
       if (dens != null) {
         const d = metrics.get(p.id)?.density;
         if (d == null || d < dens) continue;
+      }
+      if (priceNums.min != null || priceNums.max != null) {
+        const pp = p.price; // total product price (what the user pays), as shown in the "Ціна" column
+        if (pp == null) continue;
+        if (priceNums.min != null && pp < priceNums.min) continue;
+        if (priceNums.max != null && pp > priceNums.max) continue;
       }
       if (matcher && !matcher(i)) continue;
       for (const r of rangeNums) {
@@ -580,8 +623,14 @@ export default function App() {
       for (let i = 0; i < decorated.length; i++) list[i] = decorated[i].p;
     }
     return { filtered: list, catHits };
-  }, [products, metrics, matcher, crossStore, category, store, discountOnly, cheaperElsewhere, completeOnly, inStockOnly, hidePetFood, plausibleOnly, minDensity, rangeNums, sortKey, sortDir, basis]);
+  }, [products, metrics, matcher, crossStore, category, store, discountOnly, cheaperElsewhere, completeOnly, inStockOnly, hidePetFood, plausibleOnly, minDensity, priceNums, rangeNums, sortKey, sortDir, basis]);
 
+  // Count of non-default filters, shown on the mobile "Фільтри · N" button (now
+  // the sole filter-active indicator once sort moved into the drawer). Counts
+  // every drawer control that narrows the list away from its default — including
+  // the data-quality defaults when turned OFF — so N is truthful. `store` is
+  // deliberately excluded: it's a primary mode selector with its own always-
+  // visible segmented control, not a removable filter. `basis` is display-only.
   const activeFilterCount = useMemo(() => {
     let n = 0;
     for (const k of Object.keys(ranges) as NutrientKey[]) {
@@ -589,12 +638,17 @@ export default function App() {
       if (ranges[k].max !== "") n++;
     }
     if (minDensity !== "") n++;
+    if (minPrice !== "") n++;
+    if (maxPrice !== "") n++;
     if (category !== "all") n++;
     if (discountOnly) n++;
     if (cheaperElsewhere) n++;
     if (completeOnly) n++;
+    if (plausibleOnly) n++;
+    if (!inStockOnly) n++; // default ON — counts only when the user turns it off
+    if (!hidePetFood) n++; // default ON — counts only when the user turns it off
     return n;
-  }, [ranges, minDensity, category, discountOnly, cheaperElsewhere, completeOnly]);
+  }, [ranges, minDensity, minPrice, maxPrice, category, discountOnly, cheaperElsewhere, completeOnly, plausibleOnly, inStockOnly, hidePetFood]);
 
   const searchActive = search.trim().length > 0;
 
@@ -610,6 +664,18 @@ export default function App() {
   // Removable badges for the active filters (mobile quick-glance row).
   const activeBadges = useMemo(() => {
     const out: { key: string; label: string; clear: () => void }[] = [];
+    // Display-basis cue: replaces the old "значення на упаковку" hint that lived
+    // in the (now mobile-hidden) results-head, so the active basis stays visible.
+    if (basis === "pack") out.push({ key: "basis", label: "на упаковку", clear: () => setBasis("100g") });
+    if (minPrice !== "" || maxPrice !== "") {
+      const suffix =
+        minPrice !== "" && maxPrice !== ""
+          ? `${minPrice}–${maxPrice}`
+          : minPrice !== ""
+            ? `від ${minPrice}`
+            : `до ${maxPrice}`;
+      out.push({ key: "price", label: `Ціна ${suffix} ₴`, clear: () => { setMinPrice(""); setMaxPrice(""); } });
+    }
     if (category !== "all") {
       const c = categories.find((x) => x.id === category);
       out.push({ key: "cat", label: c?.title ?? "Категорія", clear: () => setCategory("all") });
@@ -641,7 +707,7 @@ export default function App() {
       });
     }
     return out;
-  }, [category, categories, discountOnly, cheaperElsewhere, completeOnly, minDensity, ranges]);
+  }, [basis, minPrice, maxPrice, category, categories, discountOnly, cheaperElsewhere, completeOnly, minDensity, ranges]);
 
   // When a search returns nothing, tell apart a misspelled term (→ offer
   // spelling suggestions) from over-tight filters (→ offer to clear them).
@@ -759,6 +825,8 @@ export default function App() {
     setCompleteOnly(false);
     setRanges(emptyRanges());
     setMinDensity("");
+    setMinPrice("");
+    setMaxPrice("");
     setActivePreset(null);
   }
 
@@ -773,12 +841,48 @@ export default function App() {
   }
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const rowVirtualizer = useVirtualizer({
+  const listRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  // Desktop: the table scrolls inside its own overflow container (scrollRef).
+  // Mobile (Phase 2): the DOCUMENT scrolls so iOS Safari can collapse its bottom
+  // toolbar and reclaim that height — so the cards are virtualized against the
+  // window. Both hooks run every render (Rules of Hooks); we select one by
+  // viewport. The unused one is inert (window virtualizer just listens; element
+  // virtualizer's getScrollElement is null on mobile since cards-scroll has no ref).
+  const elementVirtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => (isMobile ? CARD_H : ROW_H),
-    overscan: isMobile ? 6 : 12,
+    overscan: 12,
   });
+  const windowVirtualizer = useWindowVirtualizer({
+    count: filtered.length,
+    estimateSize: () => CARD_H,
+    overscan: 6,
+    scrollMargin,
+  });
+  const rowVirtualizer = isMobile ? windowVirtualizer : elementVirtualizer;
+
+  // scrollMargin = the card list's offset from the top of the document (the
+  // chrome above it: sticky topbar + sort pill + filter-bar + cat-hits). The
+  // window virtualizer needs it to place rows; re-measured whenever that chrome
+  // can change height. getBoundingClientRect().top + scrollY is scroll-stable.
+  useLayoutEffect(() => {
+    if (!isMobile) return;
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.body);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [isMobile, searchActive, activeBadges.length, catBlocks.length]);
+
   // Re-measure cached row sizes when switching between table rows and cards.
   useEffect(() => {
     rowVirtualizer.measure();
@@ -811,14 +915,100 @@ export default function App() {
 
   const renderSidebar = (inDrawer: boolean) => (
     <>
-      <section>
-        <h2>Магазин</h2>
-        <div className="basis-toggle">
+      <section className="store-section">
+        {/* No heading — the tab labels (Ашан / Сільпо / Обидва) are self-evident. */}
+        <div className="basis-toggle store-toggle">
           {STORE_OPTIONS.map((o) => (
             <button key={o.key} className={store === o.key ? "seg active" : "seg"} onClick={() => setStore(o.key)}>
               {o.label}
             </button>
           ))}
+        </div>
+      </section>
+
+      <section>
+        <h2>Сценарії</h2>
+        <div className="presets">
+          {PRESETS.map((p) => (
+            <button
+              key={p.key}
+              className={activePreset === p.key ? "preset active" : "preset"}
+              onClick={() => applyPreset(p)}
+              title={p.desc}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* One unified numeric-filter block: display unit, nutrient ranges, total
+          price range, and the price-related checkboxes — price is just another
+          numeric filter alongside calories/protein. */}
+      <section>
+        <h2>Поживність та ціна</h2>
+        <div className="basis-toggle">
+          <button className={basis === "100g" ? "seg active" : "seg"} onClick={() => setBasis("100g")}>
+            на 100 г
+          </button>
+          <button className={basis === "pack" ? "seg active" : "seg"} onClick={() => setBasis("pack")}>
+            на упаковку
+          </button>
+        </div>
+        <div className="range">
+          <label>Білок на 100 ккал ≥</label>
+          <div className="range-inputs">
+            <input
+              type="number"
+              placeholder="напр. 6"
+              value={minDensity}
+              onChange={(e) => onManualFilterChange(() => setMinDensity(e.target.value))}
+            />
+          </div>
+        </div>
+        {NUTRIENTS.map(({ key, label }) => (
+          <div className="range" key={key}>
+            <label>{label} {key === "kcal" ? "(ккал)" : "(г)"}</label>
+            <div className="range-inputs">
+              <input
+                type="number"
+                placeholder="від"
+                value={ranges[key].min}
+                onChange={(e) =>
+                  onManualFilterChange(() => setRanges((r) => ({ ...r, [key]: { ...r[key], min: e.target.value } })))
+                }
+              />
+              <input
+                type="number"
+                placeholder="до"
+                value={ranges[key].max}
+                onChange={(e) =>
+                  onManualFilterChange(() => setRanges((r) => ({ ...r, [key]: { ...r[key], max: e.target.value } })))
+                }
+              />
+            </div>
+          </div>
+        ))}
+        <div className="range">
+          <label>Ціна за товар (₴)</label>
+          <div className="range-inputs">
+            {/* Price isn't part of any preset, so editing it must NOT clear the
+                active scenario — set state directly (no onManualFilterChange). */}
+            <input
+              type="number"
+              inputMode="decimal"
+              placeholder="від"
+              value={minPrice}
+              onChange={(e) => setMinPrice(e.target.value)}
+            />
+            <input
+              type="number"
+              inputMode="decimal"
+              placeholder="до"
+              value={maxPrice}
+              onChange={(e) => setMaxPrice(e.target.value)}
+            />
+          </div>
         </div>
         <label className="checkbox">
           <input type="checkbox" checked={discountOnly} onChange={(e) => setDiscountOnly(e.target.checked)} />
@@ -859,77 +1049,11 @@ export default function App() {
       </section>
 
       <section>
-        <h2>Сценарії</h2>
-        <div className="presets">
-          {PRESETS.map((p) => (
-            <button
-              key={p.key}
-              className={activePreset === p.key ? "preset active" : "preset"}
-              onClick={() => applyPreset(p)}
-              title={p.desc}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h2>Фільтри (на 100 г)</h2>
-        <div className="range">
-          <label>Білок на 100 ккал ≥</label>
-          <div className="range-inputs">
-            <input
-              type="number"
-              placeholder="напр. 6"
-              value={minDensity}
-              onChange={(e) => onManualFilterChange(() => setMinDensity(e.target.value))}
-            />
-          </div>
-        </div>
-        {NUTRIENTS.map(({ key, label }) => (
-          <div className="range" key={key}>
-            <label>{label}</label>
-            <div className="range-inputs">
-              <input
-                type="number"
-                placeholder="від"
-                value={ranges[key].min}
-                onChange={(e) =>
-                  onManualFilterChange(() => setRanges((r) => ({ ...r, [key]: { ...r[key], min: e.target.value } })))
-                }
-              />
-              <input
-                type="number"
-                placeholder="до"
-                value={ranges[key].max}
-                onChange={(e) =>
-                  onManualFilterChange(() => setRanges((r) => ({ ...r, [key]: { ...r[key], max: e.target.value } })))
-                }
-              />
-            </div>
-          </div>
-        ))}
-      </section>
-
-      <section>
-        <h2>Відображення</h2>
-        <div className="basis-toggle">
-          <button className={basis === "100g" ? "seg active" : "seg"} onClick={() => setBasis("100g")}>
-            на 100 г
-          </button>
-          <button className={basis === "pack" ? "seg active" : "seg"} onClick={() => setBasis("pack")}>
-            на упаковку
-          </button>
-        </div>
+        <h2>Якість даних</h2>
         <label className="checkbox">
           <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} />
           Лише в наявності
         </label>
-      </section>
-
-      <section>
-        <h2>Якість даних</h2>
         <label className="checkbox">
           <input type="checkbox" checked={hidePetFood} onChange={(e) => setHidePetFood(e.target.checked)} />
           Сховати корм для тварин
@@ -952,7 +1076,7 @@ export default function App() {
         <div className="brand">
           <img
             className="site-logo"
-            src={LOGO_SRC}
+            src={theme === "dark" ? LOGO_SRC_DARK : LOGO_SRC}
             alt="Сільпо · Ашан · Львів"
             width={120}
             height={29}
@@ -966,7 +1090,7 @@ export default function App() {
           <input
             className="search"
             type="search"
-            placeholder="Пошук за назвою або брендом…"
+            placeholder={isMobile ? "Пошук…" : "Пошук за назвою або брендом…"}
             value={search}
             onChange={(e) => onManualFilterChange(() => setSearch(e.target.value))}
             onFocus={() => setHistoryOpen(true)}
@@ -980,6 +1104,9 @@ export default function App() {
               }
             }}
           />
+          {!searchActive && !historyOpen && (
+            <span className="search-count">{filtered.length.toLocaleString("uk-UA")} товарів</span>
+          )}
           {historyOpen && historyItems.length > 0 && (
             <div className="search-history">
               {historyItems.map((h) => {
@@ -1013,6 +1140,11 @@ export default function App() {
             </div>
           )}
         </div>
+        {isMobile && (
+          <button className="m-filters-btn" onClick={() => setDrawerOpen(true)} title="Фільтри та сортування">
+            Фільтри{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
+          </button>
+        )}
         <button
           className="theme-toggle"
           onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
@@ -1028,46 +1160,30 @@ export default function App() {
 
         <main className="results">
           {isMobile && (
-            <div className="m-controls">
-              <div className="chips">
-                {PRESETS.map((p) => (
-                  <button
-                    key={p.key}
-                    className={activePreset === p.key ? "chip active" : "chip"}
-                    onClick={() => applyPreset(p)}
-                  >
-                    {p.label}
-                  </button>
+            <div className="m-sort-bar">
+              <select
+                className="m-sort"
+                value={sortKey}
+                onChange={(e) => {
+                  const k = e.target.value as SortKey;
+                  setSortKey(k);
+                  setSortDir(ASC_DEFAULT.has(k) ? 1 : -1);
+                  setActivePreset(null);
+                }}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label}
+                  </option>
                 ))}
-              </div>
-              <div className="m-bar">
-                <button className="m-filters-btn" onClick={() => setDrawerOpen(true)}>
-                  Фільтри{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
-                </button>
-                <select
-                  className="m-sort"
-                  value={sortKey}
-                  onChange={(e) => {
-                    const k = e.target.value as SortKey;
-                    setSortKey(k);
-                    setSortDir(ASC_DEFAULT.has(k) ? 1 : -1);
-                    setActivePreset(null);
-                  }}
-                >
-                  {SORT_OPTIONS.map((o) => (
-                    <option key={o.key} value={o.key}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="m-dir"
-                  onClick={() => setSortDir((d) => (d === 1 ? -1 : 1))}
-                  title="Напрямок сортування"
-                >
-                  {sortDir === -1 ? "↓" : "↑"}
-                </button>
-              </div>
+              </select>
+              <button
+                className="m-dir"
+                onClick={() => setSortDir((d) => (d === 1 ? -1 : 1))}
+                title="Напрямок сортування"
+              >
+                {sortDir === -1 ? "↓" : "↑"}
+              </button>
             </div>
           )}
 
@@ -1088,16 +1204,11 @@ export default function App() {
                 </button>
               ))}
             </div>
-          ) : (
-            <div className="results-head">
-              <strong>{filtered.length.toLocaleString("uk-UA")}</strong> товарів
-              {basis === "pack" && <span className="muted"> · значення на упаковку</span>}
-            </div>
-          )}
+          ) : null}
 
           {isMobile ? (
-            <div className="cards-scroll" ref={scrollRef}>
-              <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
+            <div className="cards-scroll">
+              <div ref={listRef} style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
                 {rowVirtualizer.getVirtualItems().map((vi) => {
                   const p = filtered[vi.index];
                   return (
@@ -1109,29 +1220,40 @@ export default function App() {
                         top: 0,
                         left: 0,
                         width: "100%",
-                        transform: `translateY(${vi.start}px)`,
+                        transform: `translateY(${vi.start - (rowVirtualizer.options.scrollMargin ?? 0)}px)`,
                       }}
                     >
+                      <button
+                        className="m-replace"
+                        onClick={() => { setXstoreFor(null); setAltFor(p); }}
+                        title="Знайти корисніші варіанти"
+                        aria-label="Корисніша заміна"
+                      >
+                        ⇄
+                      </button>
                       <div className="m-card-head">
-                        {p.img ? (
-                          <img src={p.img} alt="" loading="lazy" onError={hideBrokenImg} />
-                        ) : (
-                          <div className="noimg" />
-                        )}
+                        <button
+                          className="m-img"
+                          onClick={() => { if (p.img) setZoomImg(p); }}
+                          disabled={!p.img}
+                          aria-label="Збільшити фото"
+                        >
+                          {p.img ? (
+                            <img src={p.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                          ) : (
+                            <div className="noimg" />
+                          )}
+                          {store === "all" && (
+                            <span className={STORE_BADGE[p.store].cls + " on-img"}>{STORE_BADGE[p.store].label}</span>
+                          )}
+                        </button>
                         <div className="m-card-title">
                           <a href={p.url ?? "#"} target="_blank" rel="noreferrer" className="ttl">
                             {p.title}
                           </a>
                           <div className="sub">
-                            {store === "all" && (
-                              <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
-                            )}
                             {!p.inStock && <span className="oos">немає</span>}
                             <CrossChip info={crossStore.get(p.id)} onOpen={() => { setAltFor(null); setXstoreFor(p); }} />
-                            <button className="alt-btn" onClick={() => { setXstoreFor(null); setAltFor(p); }} title="Знайти корисніші варіанти">
-                              🥗 заміна
-                            </button>
-                            {p.brand && <span className="brand">{p.brand}</span>}
                             <span className="weight">{fmtWeight(p)}</span>
                           </div>
                         </div>
@@ -1217,8 +1339,8 @@ export default function App() {
                               )}
                               {!p.inStock && <span className="oos">немає</span>}
                               <CrossChip info={crossStore.get(p.id)} onOpen={() => { setAltFor(null); setXstoreFor(p); }} />
-                              <button className="alt-btn" onClick={() => { setXstoreFor(null); setAltFor(p); }} title="Знайти корисніші варіанти">
-                                🥗 заміна
+                              <button className="alt-btn" onClick={() => { setXstoreFor(null); setAltFor(p); }} title="Знайти корисніші варіанти" aria-label="Корисніша заміна">
+                                ⇄
                               </button>
                               {p.brand && <span className="brand">{p.brand}</span>}
                               <span className="path">{p.path}</span>
@@ -1270,6 +1392,21 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {zoomImg && zoomImg.img && (
+        <div className="img-zoom-backdrop" onClick={() => setZoomImg(null)}>
+          <button className="img-zoom-close" onClick={() => setZoomImg(null)} aria-label="Закрити">
+            ✕
+          </button>
+          <figure className="img-zoom">
+            {/* Same URL as the card thumbnail — already downloaded, so the
+                browser serves it from cache and it appears instantly (no second
+                request). It's only ~200–300px, hence the modest max display size. */}
+            <img src={zoomImg.img} alt={zoomImg.title} />
+            <figcaption>{zoomImg.title}</figcaption>
+          </figure>
         </div>
       )}
 
