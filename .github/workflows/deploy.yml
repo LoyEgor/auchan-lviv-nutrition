@@ -27,6 +27,11 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  # Opt into GitHub's upcoming default for JavaScript actions now; the app build
+  # still uses the Node version configured in actions/setup-node below.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
