@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { Product, Category, Meta, NutrientKey, Basis } from "./types";
+import type { Product, Category, Meta, NutrientKey, Basis, StoreId } from "./types";
 import {
   nutrientValue,
   pricePer100g,
@@ -13,6 +13,12 @@ import {
   fmtWeight,
   compareNullable,
 } from "./lib";
+import { buildSearchIndex, createMatcher, suggestTerms } from "./search";
+import type { SearchIndex } from "./search";
+import { buildCrossStore } from "./crossStore";
+import type { CrossStoreInfo } from "./crossStore";
+import { findHealthier } from "./healthier";
+import { FILTERS_KEY, loadJSON, saveJSON, loadHistory, pushHistory, clearHistory } from "./persist";
 
 type SortKey = "title" | NutrientKey | "price" | "pricePer100" | "pricePerProtein" | "proteinPerKcal";
 type Range = { min: string; max: string };
@@ -20,7 +26,18 @@ const emptyRange = (): Range => ({ min: "", max: "" });
 type Ranges = Record<NutrientKey, Range>;
 const emptyRanges = (): Ranges => ({ kcal: emptyRange(), protein: emptyRange(), fat: emptyRange(), carbs: emptyRange() });
 
-const PET_FOOD_CAT = "for-animals-auchan";
+const PET_FOOD_CAT = "pets";
+
+type StoreFilter = "all" | StoreId;
+const STORE_OPTIONS: { key: StoreFilter; label: string }[] = [
+  { key: "all", label: "Обидва" },
+  { key: "auchan", label: "Ашан" },
+  { key: "silpo", label: "Сільпо" },
+];
+const STORE_BADGE: Record<StoreId, { label: string; cls: string }> = {
+  auchan: { label: "Ашан", cls: "store-badge auchan" },
+  silpo: { label: "Сільпо", cls: "store-badge silpo" },
+};
 // Ascending is "better" for these (cheaper / text); numbers default to descending.
 const ASC_DEFAULT = new Set<SortKey>(["title", "pricePer100", "pricePerProtein"]);
 
@@ -126,6 +143,68 @@ function rangesFromPreset(preset: Preset): Ranges {
 
 const DEFAULT_PRESET = PRESETS[0];
 
+// ---- Filter-state persistence (validated, restored once at startup) ----
+
+interface SavedState {
+  search: string;
+  category: string;
+  store: StoreFilter;
+  discountOnly: boolean;
+  cheaperElsewhere: boolean;
+  basis: Basis;
+  inStockOnly: boolean;
+  hidePetFood: boolean;
+  plausibleOnly: boolean;
+  sortKey: SortKey;
+  sortDir: 1 | -1;
+  ranges: Ranges;
+  minDensity: string;
+  activePreset: string | null;
+}
+
+const SORT_KEYS = new Set(SORT_OPTIONS.map((o) => o.key));
+
+function sanitizeSaved(raw: unknown): Partial<SavedState> {
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const out: Partial<SavedState> = {};
+  if (typeof r.search === "string") out.search = r.search;
+  if (typeof r.category === "string") out.category = r.category;
+  if (r.store === "all" || r.store === "auchan" || r.store === "silpo") out.store = r.store;
+  if (typeof r.discountOnly === "boolean") out.discountOnly = r.discountOnly;
+  if (typeof r.cheaperElsewhere === "boolean") out.cheaperElsewhere = r.cheaperElsewhere;
+  if (typeof r.inStockOnly === "boolean") out.inStockOnly = r.inStockOnly;
+  if (typeof r.hidePetFood === "boolean") out.hidePetFood = r.hidePetFood;
+  if (typeof r.plausibleOnly === "boolean") out.plausibleOnly = r.plausibleOnly;
+  if (r.basis === "100g" || r.basis === "pack") out.basis = r.basis;
+  if (SORT_KEYS.has(r.sortKey as SortKey)) out.sortKey = r.sortKey as SortKey;
+  if (r.sortDir === 1 || r.sortDir === -1) out.sortDir = r.sortDir;
+  if (typeof r.minDensity === "string") out.minDensity = r.minDensity;
+  // null = explicit manual mode (keep). A preset key that no longer exists
+  // (removed in an update) also collapses to manual mode rather than silently
+  // snapping to the default preset, which would mismatch the restored ranges.
+  // undefined is left unset so a first-time visitor still gets the default preset.
+  if (r.activePreset === null) out.activePreset = null;
+  else if (typeof r.activePreset === "string") {
+    out.activePreset = PRESETS.some((p) => p.key === r.activePreset) ? r.activePreset : null;
+  }
+  if (r.ranges && typeof r.ranges === "object") {
+    const next = emptyRanges();
+    for (const key of Object.keys(next) as NutrientKey[]) {
+      const rr = (r.ranges as Record<string, unknown>)[key];
+      if (rr && typeof rr === "object") {
+        const { min, max } = rr as Record<string, unknown>;
+        if (typeof min === "string") next[key].min = min;
+        if (typeof max === "string") next[key].max = max;
+      }
+    }
+    out.ranges = next;
+  }
+  return out;
+}
+
+const SAVED = sanitizeSaved(loadJSON(FILTERS_KEY));
+
 function sortValue(p: Product, key: SortKey, basis: Basis): number | null {
   switch (key) {
     case "kcal":
@@ -170,26 +249,106 @@ function hideBrokenImg(e: React.SyntheticEvent<HTMLImageElement>) {
   e.currentTarget.style.visibility = "hidden";
 }
 
+// Cross-store price hint: green savings chip when the same item is cheaper in
+// the other store, a faint marker when this is already the cheapest.
+function CrossChip({ info }: { info: CrossStoreInfo | undefined }) {
+  if (!info) return null;
+  if (info.isCheapest) {
+    return (
+      <span className="xstore best" title="Найдешевше серед магазинів">
+        ✓ найдешевше
+      </span>
+    );
+  }
+  // Pricier than the other store, but by < 1% after rounding — call it a tie.
+  if (info.deltaPct < 1) {
+    return (
+      <span className="xstore best" title={`Та сама ціна, що в ${STORE_BADGE[info.cheaperStore].label}`}>
+        ≈ {STORE_BADGE[info.cheaperStore].label}
+      </span>
+    );
+  }
+  return (
+    <span className="xstore cheaper" title={`Дешевше в ${STORE_BADGE[info.cheaperStore].label} на ${info.deltaPct}%`}>
+      ↘ {STORE_BADGE[info.cheaperStore].label} −{info.deltaPct}%
+    </span>
+  );
+}
+
 export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<string>("all");
-  const [basis, setBasis] = useState<Basis>("100g");
-  const [inStockOnly, setInStockOnly] = useState(true);
-  const [hidePetFood, setHidePetFood] = useState(true);
-  const [plausibleOnly, setPlausibleOnly] = useState(false);
-  const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_PRESET.sortKey);
-  const [sortDir, setSortDir] = useState<1 | -1>(DEFAULT_PRESET.sortDir);
-  const [ranges, setRanges] = useState<Ranges>(() => rangesFromPreset(DEFAULT_PRESET));
-  const [minDensity, setMinDensity] = useState(DEFAULT_PRESET.density);
-  const [activePreset, setActivePreset] = useState<string | null>(DEFAULT_PRESET.key);
+  const [search, setSearch] = useState(SAVED.search ?? "");
+  const [category, setCategory] = useState<string>(SAVED.category ?? "all");
+  const [store, setStore] = useState<StoreFilter>(SAVED.store ?? "all");
+  const [discountOnly, setDiscountOnly] = useState(SAVED.discountOnly ?? false);
+  const [cheaperElsewhere, setCheaperElsewhere] = useState(SAVED.cheaperElsewhere ?? false);
+  const [basis, setBasis] = useState<Basis>(SAVED.basis ?? "100g");
+  const [inStockOnly, setInStockOnly] = useState(SAVED.inStockOnly ?? true);
+  const [hidePetFood, setHidePetFood] = useState(SAVED.hidePetFood ?? true);
+  const [plausibleOnly, setPlausibleOnly] = useState(SAVED.plausibleOnly ?? false);
+  const [sortKey, setSortKey] = useState<SortKey>(SAVED.sortKey ?? DEFAULT_PRESET.sortKey);
+  const [sortDir, setSortDir] = useState<1 | -1>(SAVED.sortDir ?? DEFAULT_PRESET.sortDir);
+  const [ranges, setRanges] = useState<Ranges>(() => SAVED.ranges ?? rangesFromPreset(DEFAULT_PRESET));
+  const [minDensity, setMinDensity] = useState(SAVED.minDensity ?? DEFAULT_PRESET.density);
+  const [activePreset, setActivePreset] = useState<string | null>(
+    SAVED.activePreset !== undefined ? SAVED.activePreset : DEFAULT_PRESET.key
+  );
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [altFor, setAltFor] = useState<Product | null>(null);
+  const [history, setHistory] = useState<string[]>(loadHistory);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // Last query already written to history — dedupes the settle-debounce against
+  // Enter/click so the same query isn't persisted twice.
+  const lastCommittedRef = useRef("");
 
   const isMobile = useIsMobile();
+
+  const commitToHistory = (raw: string) => {
+    const q = raw.trim();
+    if (q.length < 2 || q === lastCommittedRef.current) return;
+    lastCommittedRef.current = q;
+    setHistory(pushHistory(q));
+  };
+
+  // Persist filter state (debounced — range inputs change on every keystroke).
+  useEffect(() => {
+    const state: SavedState = {
+      search,
+      category,
+      store,
+      discountOnly,
+      cheaperElsewhere,
+      basis,
+      inStockOnly,
+      hidePetFood,
+      plausibleOnly,
+      sortKey,
+      sortDir,
+      ranges,
+      minDensity,
+      activePreset,
+    };
+    const t = setTimeout(() => saveJSON(FILTERS_KEY, state), 250);
+    return () => clearTimeout(t);
+  }, [search, category, store, discountOnly, cheaperElsewhere, basis, inStockOnly, hidePetFood, plausibleOnly, sortKey, sortDir, ranges, minDensity, activePreset]);
+
+  // A restored category may no longer exist in a fresh snapshot.
+  useEffect(() => {
+    if (categories.length && category !== "all" && !categories.some((c) => c.id === category)) {
+      setCategory("all");
+    }
+  }, [categories, category]);
+
+  // Commit the query to search history once typing settles.
+  useEffect(() => {
+    const t = setTimeout(() => commitToHistory(search), 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   useEffect(() => {
     const base = import.meta.env.BASE_URL;
@@ -206,13 +365,32 @@ export default function App() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  const visibleCategories = useMemo(
-    () => categories.filter((c) => !(hidePetFood && c.id === PET_FOOD_CAT)),
-    [categories, hidePetFood]
-  );
+  const visibleCategories = useMemo(() => {
+    return categories
+      .map((c) => ({ ...c, count: store === "all" ? c.count : (c.counts[store] ?? 0) }))
+      .filter((c) => c.count > 0 && !(hidePetFood && c.id === PET_FOOD_CAT));
+  }, [categories, hidePetFood, store]);
 
-  const filtered = useMemo(() => {
-    const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  // Heavy indexes (search vocabulary ~16k tokens, cross-store equivalence over
+  // 34k products) are built AFTER the catalog first paints, so initial render
+  // isn't blocked by ~300ms of indexing. Until they arrive the matcher is null
+  // (no search filtering) and the cross-store map is empty (no chips) — both
+  // are already guarded everywhere they're read.
+  const [searchIndex, setSearchIndex] = useState<SearchIndex | null>(null);
+  const [crossStore, setCrossStore] = useState<Map<string, CrossStoreInfo>>(() => new Map());
+  useEffect(() => {
+    if (!products.length) return;
+    const t = setTimeout(() => {
+      setSearchIndex(buildSearchIndex(products));
+      setCrossStore(buildCrossStore(products));
+    }, 0);
+    return () => clearTimeout(t);
+  }, [products]);
+
+  // One pass produces both the visible list and per-category hit counts (the
+  // category filter is applied last, so the counts cover all other filters).
+  const { filtered, catHits } = useMemo(() => {
+    const matcher = searchIndex ? createMatcher(searchIndex, search) : null;
     const dens = minDensity === "" ? null : parseFloat(minDensity);
     const rangeNums = NUTRIENTS.map(({ key }) => {
       const r = ranges[key];
@@ -221,35 +399,42 @@ export default function App() {
       return { key, min: Number.isNaN(min as number) ? null : min, max: Number.isNaN(max as number) ? null : max };
     });
 
-    const out = products.filter((p) => {
-      if (category !== "all" && p.cat !== category) return false;
-      if (hidePetFood && p.cat === PET_FOOD_CAT) return false;
-      if (inStockOnly && !p.inStock) return false;
-      if (plausibleOnly && !isPlausible(p)) return false;
+    const catHits = new Map<string, number>();
+    const list: Product[] = [];
+    outer: for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      if (store !== "all" && p.store !== store) continue;
+      if (discountOnly && p.oldPrice == null) continue;
+      if (cheaperElsewhere) {
+        const ci = crossStore.get(p.id);
+        if (!ci || ci.isCheapest || ci.deltaPct < 1) continue; // only meaningfully cheaper elsewhere
+      }
+      if (hidePetFood && p.cat === PET_FOOD_CAT) continue;
+      if (inStockOnly && !p.inStock) continue;
+      if (plausibleOnly && !isPlausible(p)) continue;
       if (dens != null && !Number.isNaN(dens)) {
         const d = proteinPerKcal(p);
-        if (d == null || d < dens) return false;
+        if (d == null || d < dens) continue;
       }
-      if (words.length) {
-        const hay = `${p.title} ${p.brand ?? ""} ${p.path}`.toLowerCase();
-        if (!words.every((w) => hay.includes(w))) return false;
-      }
+      if (matcher && !matcher(i)) continue;
       for (const r of rangeNums) {
         if (r.min == null && r.max == null) continue;
         const v = p[r.key]; // per 100 g — canonical for range filtering
-        if (v == null) return false;
-        if (r.min != null && v < r.min) return false;
-        if (r.max != null && v > r.max) return false;
+        if (v == null) continue outer;
+        if (r.min != null && v < r.min) continue outer;
+        if (r.max != null && v > r.max) continue outer;
       }
-      return true;
-    });
+      catHits.set(p.cat, (catHits.get(p.cat) || 0) + 1);
+      if (category !== "all" && p.cat !== category) continue;
+      list.push(p);
+    }
 
-    out.sort((a, b) => {
+    list.sort((a, b) => {
       if (sortKey === "title") return a.title.localeCompare(b.title, "uk") * sortDir;
       return compareNullable(sortValue(a, sortKey, basis), sortValue(b, sortKey, basis), sortDir);
     });
-    return out;
-  }, [products, search, category, inStockOnly, hidePetFood, plausibleOnly, minDensity, ranges, sortKey, sortDir, basis]);
+    return { filtered: list, catHits };
+  }, [products, searchIndex, crossStore, search, category, store, discountOnly, cheaperElsewhere, inStockOnly, hidePetFood, plausibleOnly, minDensity, ranges, sortKey, sortDir, basis]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -259,8 +444,111 @@ export default function App() {
     }
     if (minDensity !== "") n++;
     if (category !== "all") n++;
+    if (discountOnly) n++;
+    if (cheaperElsewhere) n++;
     return n;
-  }, [ranges, minDensity, category]);
+  }, [ranges, minDensity, category, discountOnly, cheaperElsewhere]);
+
+  const searchActive = search.trim().length > 0;
+
+  // Category blocks shown instead of the plain results count while searching.
+  const catBlocks = useMemo(() => {
+    if (!searchActive) return [];
+    return visibleCategories
+      .map((c) => ({ ...c, hits: catHits.get(c.id) ?? 0 }))
+      .filter((c) => c.hits > 0)
+      .sort((a, b) => b.hits - a.hits);
+  }, [visibleCategories, catHits, searchActive]);
+
+  // Removable badges for the active filters (mobile quick-glance row).
+  const activeBadges = useMemo(() => {
+    const out: { key: string; label: string; clear: () => void }[] = [];
+    if (category !== "all") {
+      const c = categories.find((x) => x.id === category);
+      out.push({ key: "cat", label: c?.title ?? "Категорія", clear: () => setCategory("all") });
+    }
+    if (discountOnly) out.push({ key: "disc", label: "Зі знижкою", clear: () => setDiscountOnly(false) });
+    if (cheaperElsewhere) out.push({ key: "cheaper", label: "Дешевше деінде", clear: () => setCheaperElsewhere(false) });
+    if (minDensity !== "") {
+      out.push({
+        key: "dens",
+        label: `Б/100ккал ≥ ${minDensity}`,
+        clear: () => {
+          setMinDensity("");
+          setActivePreset(null);
+        },
+      });
+    }
+    for (const { key, label } of NUTRIENTS) {
+      const r = ranges[key];
+      if (r.min === "" && r.max === "") continue;
+      const suffix = r.min !== "" && r.max !== "" ? `${r.min}–${r.max}` : r.min !== "" ? `від ${r.min}` : `до ${r.max}`;
+      out.push({
+        key,
+        label: `${label} ${suffix}`,
+        clear: () => {
+          setRanges((x) => ({ ...x, [key]: emptyRange() }));
+          setActivePreset(null);
+        },
+      });
+    }
+    return out;
+  }, [category, categories, discountOnly, cheaperElsewhere, minDensity, ranges]);
+
+  // When a search returns nothing, tell apart a misspelled term (→ offer
+  // spelling suggestions) from over-tight filters (→ offer to clear them).
+  const emptyState = useMemo(() => {
+    if (!searchActive || filtered.length > 0 || !searchIndex) return null;
+    const matcher = createMatcher(searchIndex, search);
+    let termMatches = false;
+    if (matcher) {
+      for (let i = 0; i < products.length; i++)
+        if (matcher(i)) {
+          termMatches = true;
+          break;
+        }
+    }
+    if (termMatches) return { kind: "filters" as const, suggestions: [] as string[] };
+    return { kind: "term" as const, suggestions: suggestTerms(searchIndex, search) };
+  }, [searchActive, filtered.length, searchIndex, search, products]);
+
+  const emptyBlock =
+    filtered.length === 0 ? (
+      <div className="empty">
+        {emptyState?.kind === "term" && emptyState.suggestions.length > 0 ? (
+          <>
+            <p>
+              Нічого не знайдено за запитом «{search.trim()}».
+            </p>
+            <p className="muted">Можливо, ви мали на увазі:</p>
+            <div className="suggest-chips">
+              {emptyState.suggestions.map((s) => (
+                <button key={s} className="suggest-chip" onClick={() => onManualFilterChange(() => setSearch(s))}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : emptyState?.kind === "filters" ? (
+          <>
+            <p>За запитом «{search.trim()}» товари є, але їх приховують фільтри.</p>
+            <button className="link" onClick={clearFilters}>
+              Скинути фільтри
+            </button>
+          </>
+        ) : (
+          "Нічого не знайдено — спробуйте змінити фільтри."
+        )}
+      </div>
+    ) : null;
+
+  // Healthier same-family alternatives for the product whose panel is open.
+  const alternatives = useMemo(() => (altFor ? findHealthier(products, altFor) : []), [altFor, products]);
+
+  const historyItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return history.filter((h) => h !== search.trim() && (q === "" || h.toLowerCase().includes(q))).slice(0, 8);
+  }, [history, search]);
 
   function toggleSort(key: SortKey) {
     setActivePreset(null);
@@ -280,12 +568,19 @@ export default function App() {
     setActivePreset(preset.key);
   }
 
-  function resetFilters() {
-    setSearch("");
+  // Clear every filter except the search text.
+  function clearFilters() {
     setCategory("all");
+    setDiscountOnly(false);
+    setCheaperElsewhere(false);
     setRanges(emptyRanges());
     setMinDensity("");
     setActivePreset(null);
+  }
+
+  function resetFilters() {
+    setSearch("");
+    clearFilters();
   }
 
   function onManualFilterChange(updater: () => void) {
@@ -324,13 +619,42 @@ export default function App() {
     );
   }
 
-  const sidebarSections = (
+  // In the drawer a category tap applies instantly and dismisses the menu.
+  const selectCategory = (id: string, inDrawer: boolean) => {
+    setCategory(id);
+    if (inDrawer) setDrawerOpen(false);
+  };
+
+  const renderSidebar = (inDrawer: boolean) => (
     <>
+      <section>
+        <h2>Магазин</h2>
+        <div className="basis-toggle">
+          {STORE_OPTIONS.map((o) => (
+            <button key={o.key} className={store === o.key ? "seg active" : "seg"} onClick={() => setStore(o.key)}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <label className="checkbox">
+          <input type="checkbox" checked={discountOnly} onChange={(e) => setDiscountOnly(e.target.checked)} />
+          Лише зі знижкою
+        </label>
+        <label className="checkbox" title="Той самий товар (бренд, фасування) дешевший в іншому магазині">
+          <input
+            type="checkbox"
+            checked={cheaperElsewhere}
+            onChange={(e) => setCheaperElsewhere(e.target.checked)}
+          />
+          Дешевше в іншому магазині
+        </label>
+      </section>
+
       <section>
         <h2>Категорії</h2>
         <ul className="cat-list">
           <li>
-            <button className={category === "all" ? "cat active" : "cat"} onClick={() => setCategory("all")}>
+            <button className={category === "all" ? "cat active" : "cat"} onClick={() => selectCategory("all", inDrawer)}>
               <span>Усі категорії</span>
             </button>
           </li>
@@ -338,7 +662,7 @@ export default function App() {
             <li key={c.id}>
               <button
                 className={category === c.id ? "cat active" : "cat"}
-                onClick={() => setCategory(c.id)}
+                onClick={() => selectCategory(c.id, inDrawer)}
                 title={c.title}
               >
                 <span className="cat-name">{c.title}</span>
@@ -444,24 +768,65 @@ export default function App() {
         <div className="brand">
           <span className="logo">🥦</span>
           <div>
-            <h1>Ашан Львів · каталог за КБЖУ</h1>
+            <h1>Каталог за КБЖУ · Львів</h1>
             <p className="muted">
-              {meta.store} · {meta.totalKept.toLocaleString("uk-UA")} товарів з даними · оновлено{" "}
-              {new Date(meta.generatedAt).toLocaleDateString("uk-UA")}
+              {meta.stores.map((s) => s.title).join(" + ")} · {meta.totalKept.toLocaleString("uk-UA")} товарів ·
+              оновлено {new Date(meta.generatedAt).toLocaleDateString("uk-UA")}
             </p>
           </div>
         </div>
-        <input
-          className="search"
-          type="search"
-          placeholder="Пошук за назвою або брендом…"
-          value={search}
-          onChange={(e) => onManualFilterChange(() => setSearch(e.target.value))}
-        />
+        <div className="search-wrap">
+          <input
+            className="search"
+            type="search"
+            placeholder="Пошук: назва чи бренд, можна російською…"
+            value={search}
+            onChange={(e) => onManualFilterChange(() => setSearch(e.target.value))}
+            onFocus={() => setHistoryOpen(true)}
+            onBlur={() => setHistoryOpen(false)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commitToHistory(search);
+                e.currentTarget.blur();
+              } else if (e.key === "Escape") {
+                setHistoryOpen(false);
+              }
+            }}
+          />
+          {historyOpen && historyItems.length > 0 && (
+            <div className="search-history">
+              {historyItems.map((h) => (
+                <button
+                  key={h}
+                  className="hist-item"
+                  // mousedown (not click) so it fires before the input's blur
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    onManualFilterChange(() => setSearch(h));
+                    commitToHistory(h);
+                    setHistoryOpen(false);
+                  }}
+                >
+                  <span className="hist-icon">↺</span>
+                  {h}
+                </button>
+              ))}
+              <button
+                className="hist-clear"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setHistory(clearHistory());
+                }}
+              >
+                Очистити історію
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
       <div className="layout">
-        {!isMobile && <aside className="sidebar">{sidebarSections}</aside>}
+        {!isMobile && <aside className="sidebar">{renderSidebar(false)}</aside>}
 
         <main className="results">
           {isMobile && (
@@ -505,13 +870,47 @@ export default function App() {
                   {sortDir === -1 ? "↓" : "↑"}
                 </button>
               </div>
+              {activeBadges.length > 0 && (
+                <div className="m-badges">
+                  {activeBadges.slice(0, 4).map((b) => (
+                    <span key={b.key} className="m-badge">
+                      {b.label}
+                      <button onClick={b.clear} aria-label={`Прибрати: ${b.label}`}>
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                  {activeBadges.length > 4 && (
+                    <button className="m-badge more" onClick={() => setDrawerOpen(true)}>
+                      +{activeBadges.length - 4}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
-          <div className="results-head">
-            <strong>{filtered.length.toLocaleString("uk-UA")}</strong> товарів
-            {basis === "pack" && <span className="muted"> · значення на упаковку</span>}
-          </div>
+          {searchActive && catBlocks.length > 0 ? (
+            <div className="cat-hits">
+              {catBlocks.map((c) => (
+                <button
+                  key={c.id}
+                  className={category === c.id ? "cat-hit active" : "cat-hit"}
+                  onClick={() => setCategory(category === c.id ? "all" : c.id)}
+                  title={c.title}
+                >
+                  {c.img ? <img src={c.img} alt="" loading="lazy" onError={hideBrokenImg} /> : <div className="noimg" />}
+                  <span className="cat-hit-title">{c.title}</span>
+                  <span className="cat-hit-count">{c.hits.toLocaleString("uk-UA")}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="results-head">
+              <strong>{filtered.length.toLocaleString("uk-UA")}</strong> товарів
+              {basis === "pack" && <span className="muted"> · значення на упаковку</span>}
+            </div>
+          )}
 
           {isMobile ? (
             <div className="cards-scroll" ref={scrollRef}>
@@ -541,6 +940,11 @@ export default function App() {
                             {p.title}
                           </a>
                           <div className="sub">
+                            <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
+                            <CrossChip info={crossStore.get(p.id)} />
+                            <button className="alt-btn" onClick={() => setAltFor(p)} title="Знайти корисніші варіанти">
+                              🥗 заміна
+                            </button>
                             {p.brand && <span className="brand">{p.brand}</span>}
                             <span className="weight">{fmtWeight(p)}</span>
                           </div>
@@ -558,7 +962,10 @@ export default function App() {
                           label="Ціна"
                           value={
                             <>
-                              {fmtPrice(p.price)}
+                              {p.oldPrice != null && <span className="old-price">{fmtPrice(p.oldPrice)}</span>}
+                              <span className={p.oldPrice != null ? "discount-price" : undefined}>
+                                {fmtPrice(p.price)}
+                              </span>
                               {(p.unit === "kg" || p.unit === "l") && (
                                 <span className="per-unit">/{p.unit === "kg" ? "кг" : "л"}</span>
                               )}
@@ -570,7 +977,7 @@ export default function App() {
                   );
                 })}
               </div>
-              {filtered.length === 0 && <div className="empty">Нічого не знайдено — спробуйте змінити фільтри.</div>}
+              {emptyBlock}
             </div>
           ) : (
             <div className="table">
@@ -619,6 +1026,11 @@ export default function App() {
                               {p.title}
                             </a>
                             <div className="sub">
+                              <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
+                              <CrossChip info={crossStore.get(p.id)} />
+                              <button className="alt-btn" onClick={() => setAltFor(p)} title="Знайти корисніші варіанти">
+                                🥗 заміна
+                              </button>
                               {p.brand && <span className="brand">{p.brand}</span>}
                               <span className="path">{p.path}</span>
                               <span className="weight">{fmtWeight(p)}</span>
@@ -632,7 +1044,8 @@ export default function App() {
                           <div className="td right accent">{fmtPrice(pricePerProtein(p))}</div>
                           <div className="td right">{fmtPrice(pricePer100g(p))}</div>
                           <div className="td right">
-                            {fmtPrice(p.price)}
+                            {p.oldPrice != null && <span className="old-price">{fmtPrice(p.oldPrice)}</span>}
+                            <span className={p.oldPrice != null ? "discount-price" : undefined}>{fmtPrice(p.price)}</span>
                             {(p.unit === "kg" || p.unit === "l") && (
                               <span className="per-unit">/{p.unit === "kg" ? "кг" : "л"}</span>
                             )}
@@ -641,7 +1054,7 @@ export default function App() {
                       );
                     })}
                   </div>
-                  {filtered.length === 0 && <div className="empty">Нічого не знайдено — спробуйте змінити фільтри.</div>}
+                  {emptyBlock}
                 </div>
               </div>
             </div>
@@ -658,10 +1071,71 @@ export default function App() {
                 ✕
               </button>
             </div>
-            <div className="drawer-body">{sidebarSections}</div>
-            <button className="drawer-apply" onClick={() => setDrawerOpen(false)}>
-              Показати {filtered.length.toLocaleString("uk-UA")} товарів
-            </button>
+            <div className="drawer-body">{renderSidebar(true)}</div>
+            <div className="drawer-foot">
+              <button className="drawer-clear" onClick={resetFilters}>
+                Очистити
+              </button>
+              <button className="drawer-apply" onClick={() => setDrawerOpen(false)}>
+                Показати {filtered.length.toLocaleString("uk-UA")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {altFor && (
+        <div className="modal-backdrop" onClick={() => setAltFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-head">
+              <strong>Корисніша заміна</strong>
+              <button className="drawer-close" onClick={() => setAltFor(null)} aria-label="Закрити">
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="alt-source">
+                <div className="alt-name">{altFor.title}</div>
+                <div className="alt-metrics">
+                  <span className={STORE_BADGE[altFor.store].cls}>{STORE_BADGE[altFor.store].label}</span>
+                  <span>
+                    Б/100ккал <b>{fmt(proteinPerKcal(altFor))}</b>
+                  </span>
+                  <span>{fmt(altFor.kcal, 0)} ккал</span>
+                  <span>{fmtPrice(pricePer100g(altFor))}/100г</span>
+                </div>
+              </div>
+
+              {alternatives.length > 0 ? (
+                <>
+                  <p className="muted alt-hint">Більше білка на калорію у тій самій категорії:</p>
+                  <ul className="alt-list">
+                    {alternatives.map((a) => (
+                      <li key={a.product.id} className="alt-item">
+                        {a.product.img ? (
+                          <img src={a.product.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                        ) : (
+                          <div className="noimg" />
+                        )}
+                        <div className="alt-item-main">
+                          <a href={a.product.url ?? "#"} target="_blank" rel="noreferrer" className="ttl">
+                            {a.product.title}
+                          </a>
+                          <div className="alt-item-sub">
+                            <span className={STORE_BADGE[a.product.store].cls}>{STORE_BADGE[a.product.store].label}</span>
+                            <span className="alt-density">Б/100ккал {fmt(a.density)}</span>
+                            <span>{fmt(a.product.kcal, 0)} ккал</span>
+                            {a.cheaper === true && <span className="alt-cheaper">дешевший білок</span>}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="muted alt-hint">Це вже один із найбілковіших варіантів у своїй категорії.</p>
+              )}
+            </div>
           </div>
         </div>
       )}

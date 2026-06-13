@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "scrape": "node scraper/scrape.mjs"
+    "test": "vitest run",
+    "scrape": "npm run scrape:auchan && npm run scrape:silpo && npm run build:data",
+    "scrape:auchan": "node scraper/scrape-auchan.mjs",
+    "scrape:silpo": "node scraper/scrape-silpo.mjs",
+    "build:data": "node scraper/build-data.mjs"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.10.8",
@@ -19,6 +23,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "vitest": "^4.1.8"
   }
 }

@@ -1,117 +1,181 @@
 [
   {
-    "id": "eighteen-plus-auchan",
+    "id": "alcohol",
     "title": "Алкоголь",
-    "count": 2955
+    "count": 5655,
+    "counts": {
+      "auchan": 3007,
+      "silpo": 2648
+    },
+    "img": "https://images.silpo.ua/products/300x300/a602770c-39a9-413a-a96d-ce9f826995a5.png"
   },
   {
-    "id": "sweets-and-snacks-auchan",
+    "id": "grocery",
+    "title": "Бакалія та консерви",
+    "count": 4340,
+    "counts": {
+      "auchan": 3020,
+      "silpo": 1320
+    },
+    "img": "https://img2.zakaz.ua/2.1659634312.ad72436478c_2022-08-04_Svetlana/2.1659634312.SNCPSG10.obj.0.1.jpg.oe.jpg.pf.jpg.200nowm.jpg.200x.jpg"
+  },
+  {
+    "id": "sweets",
     "title": "Солодощі",
-    "count": 2575
+    "count": 3856,
+    "counts": {
+      "auchan": 2586,
+      "silpo": 1270
+    },
+    "img": "https://images.silpo.ua/products/300x300/e9785aff-ca60-4686-af81-340782e4556f.png"
   },
   {
-    "id": "dairy-and-eggs-auchan",
-    "title": "Яйця та молочні продукти ",
-    "count": 2255
+    "id": "dairy-eggs",
+    "title": "Молочне, сири та яйця",
+    "count": 3525,
+    "counts": {
+      "auchan": 2138,
+      "silpo": 1387
+    },
+    "img": "https://img2.zakaz.ua/04.1651150630.ad72436478c_2022-04-29_Victoria/04.1651150630.SNCPSG10.obj.0.1.jpg.oe.jpg.pf.jpg.200nowm.jpg.200x.jpg"
   },
   {
-    "id": "bioproducts-and-diabetic-goods-auchan",
-    "title": "Здорове харчування та спосіб життя ",
-    "count": 1813
+    "id": "meat",
+    "title": "М'ясо та ковбаси",
+    "count": 2129,
+    "counts": {
+      "auchan": 1215,
+      "silpo": 914
+    },
+    "img": "https://images.silpo.ua/products/300x300/2590186a-c7d8-48ea-880b-c1dcb1f78e66.png"
   },
   {
-    "id": "grocery-and-sweets-auchan",
-    "title": "Бакалія",
-    "count": 1540
+    "id": "healthy",
+    "title": "Здорове харчування",
+    "count": 1982,
+    "counts": {
+      "auchan": 1900,
+      "silpo": 82
+    },
+    "img": "https://img3.zakaz.ua/1d78e40529394b7e884356c787e243a5/1743755675-s200x200.jpg"
   },
   {
-    "id": "meat-fish-poultry-auchan",
-    "title": "М'ясо та ковбасні вироби",
-    "count": 1205
-  },
-  {
-    "id": "frozen-auchan",
-    "title": "Заморозка",
-    "count": 1071
-  },
-  {
-    "id": "hot-drinks-auchan",
-    "title": "Гарячі напої",
-    "count": 1012
-  },
-  {
-    "id": "drinks-auchan",
+    "id": "drinks",
     "title": "Напої",
-    "count": 901
+    "count": 1890,
+    "counts": {
+      "auchan": 915,
+      "silpo": 975
+    },
+    "img": "https://images.silpo.ua/products/300x300/c4bf725a-4da3-4449-bb22-ee18b6683c55.png"
   },
   {
-    "id": "sauces-and-spices-auchan",
+    "id": "frozen",
+    "title": "Заморозка",
+    "count": 1677,
+    "counts": {
+      "auchan": 1071,
+      "silpo": 606
+    },
+    "img": "https://images.silpo.ua/products/300x300/0bf77323-6ae5-4419-bd0b-e616ef69f9ec.png"
+  },
+  {
+    "id": "coffee-tea",
+    "title": "Кава та чай",
+    "count": 1490,
+    "counts": {
+      "auchan": 1010,
+      "silpo": 480
+    },
+    "img": "https://img2.zakaz.ua/6cd24a1ad2c44267a4a2534c0bf8ed2a/1757511750-s200x200.jpg"
+  },
+  {
+    "id": "sauces",
     "title": "Соуси та спеції",
-    "count": 878
+    "count": 1445,
+    "counts": {
+      "auchan": 883,
+      "silpo": 562
+    },
+    "img": "https://img3.zakaz.ua/e6ff8d647efb49b3aea046ea2afab8fc/1772728566-s200x200.jpg"
   },
   {
-    "id": "fruits-and-vegetables-auchan",
+    "id": "fruits-vegetables",
     "title": "Фрукти та овочі",
-    "count": 873
+    "count": 1371,
+    "counts": {
+      "auchan": 875,
+      "silpo": 496
+    },
+    "img": "https://img3.zakaz.ua/0888cab85048451587c8a2e278a69d93/1742842279-s200x200.jpg"
   },
   {
-    "id": "fish-and-seafood-auchan",
+    "id": "fish",
     "title": "Риба та морепродукти",
-    "count": 759
+    "count": 1172,
+    "counts": {
+      "auchan": 761,
+      "silpo": 411
+    },
+    "img": "https://images.silpo.ua/products/300x300/14a8187b-c5c3-4b2c-8be3-d3cc797604f9.png"
   },
   {
-    "id": "canned-food-auchan",
-    "title": "Консерви",
-    "count": 756
-  },
-  {
-    "id": "for-animals-auchan",
-    "title": "Товари для тварин",
-    "count": 707
-  },
-  {
-    "id": "world-cuisine-auchan",
-    "title": "Товари світу",
-    "count": 696
-  },
-  {
-    "id": "crisps-and-snacks-auchan",
+    "id": "snacks",
     "title": "Чипси та снеки",
-    "count": 637
+    "count": 1025,
+    "counts": {
+      "auchan": 677,
+      "silpo": 348
+    },
+    "img": "https://img3.zakaz.ua/ddf90ea3d62e40268c4fa974602313ea/1751629179-s200x200.jpg"
   },
   {
-    "id": "bakery-auchan",
-    "title": "Пекарня",
-    "count": 568
+    "id": "bakery",
+    "title": "Хліб та випічка",
+    "count": 926,
+    "counts": {
+      "auchan": 560,
+      "silpo": 366
+    },
+    "img": "https://images.silpo.ua/products/300x300/82231843-ad54-49e2-b8da-5f47333a37f7.png"
   },
   {
-    "id": "babies-auchan",
-    "title": "Товари для дітей",
-    "count": 246
+    "id": "pets",
+    "title": "Товари для тварин",
+    "count": 872,
+    "counts": {
+      "auchan": 707,
+      "silpo": 165
+    },
+    "img": "https://img2.zakaz.ua/a10d000aee994da6b40f1a0b25703fa6/1764073342-s200x200.jpg"
   },
   {
-    "id": "ready-meals-auchan",
+    "id": "ready-meals",
     "title": "Кулінарія",
-    "count": 215
+    "count": 539,
+    "counts": {
+      "auchan": 222,
+      "silpo": 317
+    },
+    "img": "https://images.silpo.ua/products/300x300/18c3cfb7-3f12-419c-969e-a4b3b1b0d709.png"
   },
   {
-    "id": "discount-love-auchan",
-    "title": "ЗнижкоLove",
-    "count": 62
+    "id": "baby",
+    "title": "Дитяче харчування",
+    "count": 481,
+    "counts": {
+      "auchan": 246,
+      "silpo": 235
+    },
+    "img": "https://images.silpo.ua/products/300x300/ed54cc0c-c1d2-4b09-aa00-048b4574cbcd.png"
   },
   {
-    "id": "personal-hygiene-auchan",
-    "title": "Гігієна та догляд",
-    "count": 35
-  },
-  {
-    "id": "interior-and-textiles-auchan",
-    "title": "Інтер'єр та текстиль",
-    "count": 2
-  },
-  {
-    "id": "low-price-auchan",
-    "title": "Вигідні пропозиції",
-    "count": 2
+    "id": "other",
+    "title": "Інше",
+    "count": 100,
+    "counts": {
+      "auchan": 100
+    },
+    "img": "https://img3.zakaz.ua/83d6aacd6eed417d9d5db22f4db9a7e8/1758018628-s200x200.jpg"
   }
 ]

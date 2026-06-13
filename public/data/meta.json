@@ -1,12 +1,41 @@
 {
-  "store": "Auchan Lviv DRIVE",
-  "storeId": "48246409",
-  "generatedAt": "2026-06-06T13:47:35.964Z",
-  "totalSeen": 49264,
-  "totalKept": 21763,
-  "withKcal": 21234,
-  "withProtein": 20190,
-  "withFat": 20320,
-  "withCarbs": 20069,
-  "full4": 19325
+  "generatedAt": "2026-06-13T07:04:06.583Z",
+  "totalSeen": 65091,
+  "totalKept": 34475,
+  "withKcal": 33065,
+  "withProtein": 32065,
+  "withFat": 31979,
+  "withCarbs": 32194,
+  "full4": 30571,
+  "withDiscount": 6558,
+  "stores": [
+    {
+      "store": "auchan",
+      "title": "Ашан Львів",
+      "storeRef": "48246409",
+      "generatedAt": "2026-06-12T02:22:49.486Z",
+      "totalSeen": 49789,
+      "totalKept": 21893,
+      "withKcal": 21386,
+      "withProtein": 20309,
+      "withFat": 20437,
+      "withCarbs": 20192,
+      "full4": 19462,
+      "withDiscount": 2238
+    },
+    {
+      "store": "silpo",
+      "title": "Сільпо Львів",
+      "storeRef": "1edb6b58-cf2f-6c14-b8ca-d11f2666a570",
+      "generatedAt": "2026-06-12T02:26:45.455Z",
+      "totalSeen": 15302,
+      "totalKept": 12582,
+      "withKcal": 11679,
+      "withProtein": 11756,
+      "withFat": 11542,
+      "withCarbs": 12002,
+      "full4": 11109,
+      "withDiscount": 4320
+    }
+  ]
 }
