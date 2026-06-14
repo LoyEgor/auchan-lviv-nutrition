@@ -65,7 +65,8 @@
 .td-img img,
 .m-card-head img,
 .cat-hit img,
-.alt-item img {
+.alt-item img,
+.alt-source img {
   background: var(--thumb-bg);
   border-radius: 8px;
 }
@@ -568,12 +569,15 @@ input:focus:not(:focus-visible) {
   margin-left: 1px;
 }
 .store-badge {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
+  height: 16px;
   font-size: 11px;
   font-weight: 700;
   padding: 0 5px;
   border-radius: 4px;
-  line-height: 16px;
+  line-height: 1;
 }
 .store-badge.auchan {
   background: var(--auchan-soft);
@@ -703,22 +707,43 @@ input:focus:not(:focus-visible) {
   padding: 14px 16px 18px;
 }
 .alt-source {
+  display: flex;
+  gap: 10px;
+  align-items: center;
   padding: 10px 12px;
   background: var(--bg);
   border-radius: 10px;
   margin-bottom: 14px;
 }
+/* Source product thumbnail — same look as .alt-item img. */
+.alt-source img,
+.alt-source .noimg {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.alt-source-main {
+  min-width: 0;
+  flex: 1;
+}
 .alt-name {
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
 .alt-metrics {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  column-gap: 10px;
+  row-gap: 4px;
   align-items: center;
   font-size: 12px;
+  line-height: 16px;
   color: var(--muted);
+}
+.alt-metrics > * {
+  line-height: 16px;
 }
 .alt-metrics b {
   color: var(--text);
@@ -764,15 +789,30 @@ input:focus:not(:focus-visible) {
 .alt-item-sub {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 4px;
   align-items: center;
   font-size: 12px;
+  line-height: 16px;
   color: var(--muted);
   margin-top: 3px;
+}
+.alt-item-sub > * {
+  line-height: 16px;
 }
 .alt-density {
   color: var(--accent);
   font-weight: 600;
+}
+/* Cross-store total-price highlight: green when this side is the cheaper of the
+   two, red when pricier. */
+.price-cheaper {
+  color: var(--accent);
+  font-weight: 700;
+}
+.price-pricier {
+  color: var(--danger);
+  font-weight: 700;
 }
 .alt-cheaper {
   background: var(--accent-soft);
@@ -878,8 +918,22 @@ input:focus:not(:focus-visible) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.brand {
+/* Row brand is a clickable filter trigger (button reset to look like the old
+   text span). Scoped to .sub so it never touches the topbar wordmark (.brand)
+   or the mobile hide rule. */
+.sub .brand {
+  font: inherit;
   font-weight: 600;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.sub .brand:hover {
+  color: var(--accent);
+  background: var(--hover);
 }
 .path {
   overflow: hidden;
@@ -1042,10 +1096,11 @@ input:focus:not(:focus-visible) {
   position: absolute;
   left: 0;
   bottom: 0;
+  height: 13px;
   font-size: 9px;
   font-weight: 700;
   padding: 0 3px;
-  line-height: 13px;
+  line-height: 1;
   border-radius: 4px 0 4px 0;
 }
 /* Replace/alternatives action: a swap glyph in the card's top-right corner. */

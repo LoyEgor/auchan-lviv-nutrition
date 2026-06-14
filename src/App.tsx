@@ -17,7 +17,7 @@ import { buildSearchIndex, createMatcher, suggestTerms } from "./search";
 import type { SearchIndex } from "./search";
 import { buildCrossStore } from "./crossStore";
 import type { CrossStoreInfo } from "./crossStore";
-import { findHealthier } from "./healthier";
+import { findHealthier, buildHasHealthier } from "./healthier";
 import { FILTERS_KEY, loadJSON, saveJSON, loadHistory, pushHistory, clearHistory, saveTheme } from "./persist";
 import type { HistoryEntry, HistoryFilters, Theme } from "./persist";
 
@@ -190,6 +190,7 @@ const DEFAULT_PRESET = PRESETS[0];
 interface SavedState {
   search: string;
   category: string;
+  brandFilter: string | null;
   store: StoreFilter;
   discountOnly: boolean;
   cheaperElsewhere: boolean;
@@ -215,6 +216,8 @@ function sanitizeSaved(raw: unknown): Partial<SavedState> {
   const out: Partial<SavedState> = {};
   if (typeof r.search === "string") out.search = r.search;
   if (typeof r.category === "string") out.category = r.category;
+  if (r.brandFilter === null) out.brandFilter = null;
+  else if (typeof r.brandFilter === "string") out.brandFilter = r.brandFilter;
   if (r.store === "all" || r.store === "auchan" || r.store === "silpo") out.store = r.store;
   if (typeof r.discountOnly === "boolean") out.discountOnly = r.discountOnly;
   if (typeof r.cheaperElsewhere === "boolean") out.cheaperElsewhere = r.cheaperElsewhere;
@@ -325,6 +328,7 @@ export default function App() {
 
   const [search, setSearch] = useState(SAVED.search ?? "");
   const [category, setCategory] = useState<string>(SAVED.category ?? "all");
+  const [brandFilter, setBrandFilter] = useState<string | null>(SAVED.brandFilter ?? null);
   const [store, setStore] = useState<StoreFilter>(SAVED.store ?? "auchan");
   const [discountOnly, setDiscountOnly] = useState(SAVED.discountOnly ?? false);
   const [cheaperElsewhere, setCheaperElsewhere] = useState(SAVED.cheaperElsewhere ?? false);
@@ -404,6 +408,7 @@ export default function App() {
     const state: SavedState = {
       search,
       category,
+      brandFilter,
       store,
       discountOnly,
       cheaperElsewhere,
@@ -422,7 +427,7 @@ export default function App() {
     };
     const t = setTimeout(() => saveJSON(FILTERS_KEY, state), 250);
     return () => clearTimeout(t);
-  }, [search, category, store, discountOnly, cheaperElsewhere, completeOnly, basis, inStockOnly, hidePetFood, plausibleOnly, sortKey, sortDir, ranges, minDensity, minPrice, maxPrice, activePreset]);
+  }, [search, category, brandFilter, store, discountOnly, cheaperElsewhere, completeOnly, basis, inStockOnly, hidePetFood, plausibleOnly, sortKey, sortDir, ranges, minDensity, minPrice, maxPrice, activePreset]);
 
   // Reflect theme changes onto <html> and persist the explicit choice.
   useEffect(() => {
@@ -488,6 +493,10 @@ export default function App() {
   // are already guarded everywhere they're read.
   const [searchIndex, setSearchIndex] = useState<SearchIndex | null>(null);
   const [crossStore, setCrossStore] = useState<Map<string, CrossStoreInfo>>(() => new Map());
+  // Product IDs that have at least one healthier same-family alternative, for the
+  // current store mode — gates the "swap" button. Empty until built (buttons show
+  // optimistically meanwhile). Guarded everywhere it's read.
+  const [hasAlt, setHasAlt] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     if (!products.length) return;
     const t = setTimeout(() => {
@@ -496,6 +505,13 @@ export default function App() {
     }, 0);
     return () => clearTimeout(t);
   }, [products]);
+  // Kept separate from the search/cross-store build so a store toggle rebuilds
+  // only the (store-scoped) alternatives index, not the store-agnostic ones.
+  useEffect(() => {
+    if (!products.length) return;
+    const t = setTimeout(() => setHasAlt(buildHasHealthier(products, store)), 0);
+    return () => clearTimeout(t);
+  }, [products, store]);
 
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
@@ -563,6 +579,7 @@ export default function App() {
     outer: for (let i = 0; i < products.length; i++) {
       const p = products[i];
       if (store !== "all" && p.store !== store) continue;
+      if (brandFilter != null && p.brand !== brandFilter) continue;
       if (discountOnly && p.oldPrice == null) continue;
       if (completeOnly && (p.kcal == null || p.protein == null || p.fat == null || p.carbs == null)) continue;
       if (cheaperElsewhere) {
@@ -623,7 +640,7 @@ export default function App() {
       for (let i = 0; i < decorated.length; i++) list[i] = decorated[i].p;
     }
     return { filtered: list, catHits };
-  }, [products, metrics, matcher, crossStore, category, store, discountOnly, cheaperElsewhere, completeOnly, inStockOnly, hidePetFood, plausibleOnly, minDensity, priceNums, rangeNums, sortKey, sortDir, basis]);
+  }, [products, metrics, matcher, crossStore, category, brandFilter, store, discountOnly, cheaperElsewhere, completeOnly, inStockOnly, hidePetFood, plausibleOnly, minDensity, priceNums, rangeNums, sortKey, sortDir, basis]);
 
   // Count of non-default filters, shown on the mobile "Фільтри · N" button (now
   // the sole filter-active indicator once sort moved into the drawer). Counts
@@ -664,6 +681,9 @@ export default function App() {
   // Removable badges for the active filters (mobile quick-glance row).
   const activeBadges = useMemo(() => {
     const out: { key: string; label: string; clear: () => void }[] = [];
+    // Active search query as a removable chip — leads the bar. Cleared
+    // independently of clearFilters (which intentionally keeps the search text).
+    if (searchActive) out.push({ key: "search", label: `🔍 «${search.trim()}»`, clear: () => setSearch("") });
     // Display-basis cue: replaces the old "значення на упаковку" hint that lived
     // in the (now mobile-hidden) results-head, so the active basis stays visible.
     if (basis === "pack") out.push({ key: "basis", label: "на упаковку", clear: () => setBasis("100g") });
@@ -679,6 +699,9 @@ export default function App() {
     if (category !== "all") {
       const c = categories.find((x) => x.id === category);
       out.push({ key: "cat", label: c?.title ?? "Категорія", clear: () => setCategory("all") });
+    }
+    if (brandFilter != null) {
+      out.push({ key: "brand", label: brandFilter, clear: () => setBrandFilter(null) });
     }
     if (discountOnly) out.push({ key: "disc", label: "Зі знижкою", clear: () => setDiscountOnly(false) });
     if (cheaperElsewhere) out.push({ key: "cheaper", label: "Дешевше деінде", clear: () => setCheaperElsewhere(false) });
@@ -707,7 +730,7 @@ export default function App() {
       });
     }
     return out;
-  }, [basis, minPrice, maxPrice, category, categories, discountOnly, cheaperElsewhere, completeOnly, minDensity, ranges]);
+  }, [searchActive, search, basis, minPrice, maxPrice, category, brandFilter, categories, discountOnly, cheaperElsewhere, completeOnly, minDensity, ranges]);
 
   // When a search returns nothing, tell apart a misspelled term (→ offer
   // spelling suggestions) from over-tight filters (→ offer to clear them).
@@ -820,6 +843,7 @@ export default function App() {
   // Clear every filter except the search text.
   function clearFilters() {
     setCategory("all");
+    setBrandFilter(null);
     setDiscountOnly(false);
     setCheaperElsewhere(false);
     setCompleteOnly(false);
@@ -1223,14 +1247,16 @@ export default function App() {
                         transform: `translateY(${vi.start - (rowVirtualizer.options.scrollMargin ?? 0)}px)`,
                       }}
                     >
-                      <button
-                        className="m-replace"
-                        onClick={() => { setXstoreFor(null); setAltFor(p); }}
-                        title="Знайти корисніші варіанти"
-                        aria-label="Корисніша заміна"
-                      >
-                        ⇄
-                      </button>
+                      {(hasAlt.size === 0 || hasAlt.has(p.id)) && (
+                        <button
+                          className="m-replace"
+                          onClick={() => { setXstoreFor(null); setAltFor(p); }}
+                          title="Знайти корисніші варіанти"
+                          aria-label="Корисніша заміна"
+                        >
+                          ⇄
+                        </button>
+                      )}
                       <div className="m-card-head">
                         <button
                           className="m-img"
@@ -1339,10 +1365,20 @@ export default function App() {
                               )}
                               {!p.inStock && <span className="oos">немає</span>}
                               <CrossChip info={crossStore.get(p.id)} onOpen={() => { setAltFor(null); setXstoreFor(p); }} />
-                              <button className="alt-btn" onClick={() => { setXstoreFor(null); setAltFor(p); }} title="Знайти корисніші варіанти" aria-label="Корисніша заміна">
-                                ⇄
-                              </button>
-                              {p.brand && <span className="brand">{p.brand}</span>}
+                              {(hasAlt.size === 0 || hasAlt.has(p.id)) && (
+                                <button className="alt-btn" onClick={() => { setXstoreFor(null); setAltFor(p); }} title="Знайти корисніші варіанти" aria-label="Корисніша заміна">
+                                  ⇄
+                                </button>
+                              )}
+                              {p.brand && (
+                                <button
+                                  className="brand"
+                                  onClick={() => onManualFilterChange(() => setBrandFilter(p.brand))}
+                                  title={`Лише бренд: ${p.brand}`}
+                                >
+                                  {p.brand}
+                                </button>
+                              )}
                               <span className="path">{p.path}</span>
                               <span className="weight">{fmtWeight(p)}</span>
                             </div>
@@ -1421,14 +1457,21 @@ export default function App() {
             </div>
             <div className="modal-body">
               <div className="alt-source">
-                <div className="alt-name">{altFor.title}</div>
-                <div className="alt-metrics">
-                  <span className={STORE_BADGE[altFor.store].cls}>{STORE_BADGE[altFor.store].label}</span>
-                  <span>
-                    Б/100ккал <b>{fmt(proteinPerKcal(altFor))}</b>
-                  </span>
-                  <span>{fmt(altFor.kcal, 0)} ккал</span>
-                  <span>{fmtPrice(pricePerProtein(altFor))}/100гБ</span>
+                {altFor.img ? (
+                  <img src={altFor.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                ) : (
+                  <div className="noimg" />
+                )}
+                <div className="alt-source-main">
+                  <div className="alt-name">{altFor.title}</div>
+                  <div className="alt-metrics">
+                    <span className={STORE_BADGE[altFor.store].cls}>{STORE_BADGE[altFor.store].label}</span>
+                    <span>
+                      Б/100ккал <b>{fmt(proteinPerKcal(altFor))}</b>
+                    </span>
+                    <span>{fmt(altFor.kcal, 0)} ккал</span>
+                    <span>{fmtPrice(pricePerProtein(altFor))}/100гБ</span>
+                  </div>
                 </div>
               </div>
 
@@ -1503,8 +1546,8 @@ export default function App() {
                         </a>
                         <div className="alt-item-sub">
                           <span className={STORE_BADGE[pr.store].cls}>{STORE_BADGE[pr.store].label}</span>
-                          <span className={cheaper ? "alt-density" : undefined}>{fmtPrice(per)}/100г</span>
-                          <span>
+                          <span>{fmtPrice(per)}/100г</span>
+                          <span className={cheaper ? "price-cheaper" : "price-pricier"}>
                             {fmtPrice(pr.price)}
                             {(pr.unit === "kg" || pr.unit === "l") && ` / ${pr.unit === "kg" ? "кг" : "л"}`}
                           </span>
