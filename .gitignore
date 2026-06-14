@@ -6,3 +6,7 @@ dist/
 scraper/raw/
 
 *.tsbuildinfo
+
+# Throwaway verification / Playwright scripts live at the repo root — never commit
+# them (real scrapers live under scraper/, so subdir .mjs are unaffected).
+/*.mjs
