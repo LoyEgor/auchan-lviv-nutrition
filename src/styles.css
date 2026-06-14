@@ -869,22 +869,38 @@ input:focus:not(:focus-visible) {
   height: 40px;
   object-fit: contain;
 }
-/* Hover peek: pop the (already loaded) thumbnail to 200×200. Changing width/
-   height re-rasterises from the source — crisp — unlike transform:scale. The
-   thumbnail is ~200–300px, so 200×200 is native/downscaled, never blurry. */
-.td-img:hover img {
+/* Hover peek: a 200×200 preview painted as a ::after overlay to the RIGHT of the
+   thumbnail (same already-cached image via background-image — no extra request),
+   so the thumbnail stays put. Placed beside the image column, not over it, and
+   pointer-events:none — so moving the cursor down the column never passes under a
+   preview and the peek never flickers. The trigger stays the fixed 40px cell. */
+.td-img.has-thumb::after {
+  content: "";
   position: absolute;
   top: 50%;
-  left: 0;
+  left: calc(100% + 6px);
   transform: translateY(-50%);
   width: 200px;
   height: 200px;
+  box-sizing: border-box;
   padding: 8px;
-  background: var(--panel);
+  background-image: var(--thumb);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  background-origin: content-box;
+  background-color: var(--panel);
   border: 1px solid var(--hairline);
   border-radius: 10px;
   box-shadow: var(--shadow-pop);
   z-index: 20;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.td-img.has-thumb:hover::after {
+  opacity: 1;
+  visibility: visible;
 }
 .noimg {
   width: 40px;

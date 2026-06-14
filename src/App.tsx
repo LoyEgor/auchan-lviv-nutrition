@@ -1363,7 +1363,12 @@ export default function App() {
                             transform: `translateY(${vi.start}px)`,
                           }}
                         >
-                          <div className="td td-img">
+                          {/* --thumb feeds the ::after hover-peek (same cached URL, no extra
+                              request); has-thumb gates it so image-less rows show no empty box. */}
+                          <div
+                            className={p.img ? "td td-img has-thumb" : "td td-img"}
+                            style={p.img ? ({ ["--thumb"]: `url("${p.img}")` } as React.CSSProperties) : undefined}
+                          >
                             {p.img ? (
                               <img src={p.img} alt="" loading="lazy" decoding="async" onError={hideBrokenImg} />
                             ) : (
