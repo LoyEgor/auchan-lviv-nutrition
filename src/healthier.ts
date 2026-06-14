@@ -76,51 +76,52 @@ export function findHealthier(
   return scored.slice(0, limit).map((s) => s.alt);
 }
 
-// Existence-only variant of findHealthier's inner predicate: returns true on the
-// FIRST qualifying candidate, with no scoring/sort/allocation. `sameCat` is the
-// pre-grouped slice of products sharing source.cat, so this never re-scans the
-// whole catalog. Drives whether the "healthier swap" button renders.
-// MUST stay in lockstep with findHealthier's inner filter (MIN_KCAL,
-// DENSITY_GAIN, sigTokens, shared-token rule) or the gate and the modal disagree.
-export function hasHealthier(
-  source: Product,
-  sameCat: Product[],
-  storeFilter: "all" | "auchan" | "silpo" = "all"
-): boolean {
-  const srcDensity = proteinPerKcal(source);
-  if (srcDensity == null || source.kcal == null) return false;
-  const srcTokens = sigTokens(source.title, source.brand);
-  if (srcTokens.size === 0) return false;
-  for (const p of sameCat) {
-    if (p.id === source.id || !p.inStock) continue;
-    if (storeFilter !== "all" && p.store !== storeFilter) continue;
-    if (p.kcal == null || p.kcal < MIN_KCAL) continue;
-    const d = proteinPerKcal(p);
-    if (d == null || d < srcDensity * DENSITY_GAIN) continue;
-    const pt = sigTokens(p.title, p.brand);
-    for (const t of srcTokens) if (pt.has(t)) return true; // first shared token wins
-  }
-  return false;
-}
-
 // Set of product IDs that have at least one healthier same-family alternative for
-// the given store mode. Built once (off the first-paint path): groups by category
-// once, then scans only same-category items per product. Store mode is baked in
-// because findHealthier (the modal) is store-scoped the same way.
+// the given store mode — gates the "swap" button so it isn't shown for unique
+// items. Built once, off the first-paint path. Store mode is baked in because
+// findHealthier (the modal) is store-scoped the same way.
+//
+// Perf: sigTokens (tokenization) and proteinPerKcal are computed ONCE per product
+// up front, not inside the O(category^2) inner loop — otherwise a ~5k-item
+// category re-tokenizes millions of times and freezes the main thread for seconds.
+// The inner loop is then just numeric checks + a tiny token-set intersection, and
+// it early-exits on the first qualifying candidate.
+// MUST stay in lockstep with findHealthier's inner filter (MIN_KCAL, DENSITY_GAIN,
+// sigTokens, shared-token rule) or the gate and the modal disagree.
 export function buildHasHealthier(
   products: Product[],
   storeFilter: "all" | "auchan" | "silpo" = "all"
 ): Set<string> {
+  const tokensOf = new Map<string, Set<string>>();
+  const densityOf = new Map<string, number | null>();
   const byCat = new Map<string, Product[]>();
   for (const p of products) {
+    tokensOf.set(p.id, sigTokens(p.title, p.brand));
+    densityOf.set(p.id, proteinPerKcal(p));
     const bucket = byCat.get(p.cat);
     if (bucket) bucket.push(p);
     else byCat.set(p.cat, [p]);
   }
+
   const out = new Set<string>();
-  for (const p of products) {
-    const sameCat = byCat.get(p.cat);
-    if (sameCat && hasHealthier(p, sameCat, storeFilter)) out.add(p.id);
+  for (const source of products) {
+    const srcDensity = densityOf.get(source.id);
+    if (srcDensity == null || source.kcal == null) continue;
+    const srcTokens = tokensOf.get(source.id)!;
+    if (srcTokens.size === 0) continue;
+    const threshold = srcDensity * DENSITY_GAIN;
+    const bucket = byCat.get(source.cat)!;
+    for (const p of bucket) {
+      if (p.id === source.id || !p.inStock) continue;
+      if (storeFilter !== "all" && p.store !== storeFilter) continue;
+      if (p.kcal == null || p.kcal < MIN_KCAL) continue;
+      const d = densityOf.get(p.id);
+      if (d == null || d < threshold) continue;
+      const pt = tokensOf.get(p.id)!;
+      let shared = false;
+      for (const t of srcTokens) if (pt.has(t)) { shared = true; break; }
+      if (shared) { out.add(source.id); break; } // first qualifying candidate wins
+    }
   }
   return out;
 }

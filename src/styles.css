@@ -909,40 +909,61 @@ input:focus:not(:focus-visible) {
 .ttl:hover {
   color: var(--accent);
 }
+/* Secondary metadata row: ALWAYS a single line, never overlapping. Fixed-size
+   chips (badge / oos / cross-store / swap / weight) don't shrink; the two text
+   items (brand, category path) each clip with an ellipsis, so neither can ever
+   overflow its box onto a neighbour. align-items:center keeps everything on one
+   baseline regardless of which chips are present. */
 .sub {
   display: flex;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: 11px;
   color: var(--muted);
-  white-space: nowrap;
+  overflow: hidden;
+}
+.sub > .store-badge,
+.sub > .oos,
+.sub > .xstore,
+.sub > .alt-btn {
+  flex-shrink: 0;
+}
+.weight {
+  flex-shrink: 0;
+}
+/* The two truncatable texts. Both ellipsis (so text never spills over a sibling);
+   the path gives way first, the clicked-able brand keeps a little room. */
+.sub > .brand,
+.sub > .path {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub > .path {
+  flex: 1 1 auto;
 }
 /* Row brand is a clickable filter trigger (button reset to look like the old
    text span). Scoped to .sub so it never touches the topbar wordmark (.brand)
    or the mobile hide rule. */
-.sub .brand {
+.sub > .brand {
+  flex: 0 1 auto;
+  max-width: 45%;
+  display: block;
   font: inherit;
   font-weight: 600;
   color: var(--muted);
   background: none;
   border: none;
   padding: 0;
+  text-align: left;
   cursor: pointer;
   border-radius: 4px;
 }
-.sub .brand:hover {
+.sub > .brand:hover {
   color: var(--accent);
   background: var(--hover);
-}
-.path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex-shrink: 1;
-}
-.weight {
-  flex-shrink: 0;
 }
 .empty {
   padding: 40px 20px;

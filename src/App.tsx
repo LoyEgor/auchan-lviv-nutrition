@@ -505,11 +505,26 @@ export default function App() {
     }, 0);
     return () => clearTimeout(t);
   }, [products]);
+  // Per-store cache so toggling back to an already-computed store is instant
+  // (no rebuild). Reset whenever the catalog itself changes.
+  const hasAltCache = useRef<Map<StoreFilter, Set<string>>>(new Map());
+  useEffect(() => {
+    hasAltCache.current = new Map();
+  }, [products]);
   // Kept separate from the search/cross-store build so a store toggle rebuilds
   // only the (store-scoped) alternatives index, not the store-agnostic ones.
   useEffect(() => {
     if (!products.length) return;
-    const t = setTimeout(() => setHasAlt(buildHasHealthier(products, store)), 0);
+    const cached = hasAltCache.current.get(store);
+    if (cached) {
+      setHasAlt(cached);
+      return;
+    }
+    const t = setTimeout(() => {
+      const set = buildHasHealthier(products, store);
+      hasAltCache.current.set(store, set);
+      setHasAlt(set);
+    }, 0);
     return () => clearTimeout(t);
   }, [products, store]);
 
@@ -1222,7 +1237,7 @@ export default function App() {
                   onClick={() => setCategory(category === c.id ? "all" : c.id)}
                   title={c.title}
                 >
-                  {c.img ? <img src={c.img} alt="" loading="lazy" onError={hideBrokenImg} /> : <div className="noimg" />}
+                  {c.img ? <img src={c.img} alt="" loading="lazy" decoding="async" onError={hideBrokenImg} /> : <div className="noimg" />}
                   <span className="cat-hit-title">{c.title}</span>
                   <span className="cat-hit-count">{c.hits.toLocaleString("uk-UA")}</span>
                 </button>
@@ -1265,7 +1280,7 @@ export default function App() {
                           aria-label="Збільшити фото"
                         >
                           {p.img ? (
-                            <img src={p.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                            <img src={p.img} alt="" loading="lazy" decoding="async" onError={hideBrokenImg} />
                           ) : (
                             <div className="noimg" />
                           )}
@@ -1350,7 +1365,7 @@ export default function App() {
                         >
                           <div className="td td-img">
                             {p.img ? (
-                              <img src={p.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                              <img src={p.img} alt="" loading="lazy" decoding="async" onError={hideBrokenImg} />
                             ) : (
                               <div className="noimg" />
                             )}
@@ -1440,7 +1455,7 @@ export default function App() {
             {/* Same URL as the card thumbnail — already downloaded, so the
                 browser serves it from cache and it appears instantly (no second
                 request). It's only ~200–300px, hence the modest max display size. */}
-            <img src={zoomImg.img} alt={zoomImg.title} />
+            <img src={zoomImg.img} alt={zoomImg.title} decoding="async" />
             <figcaption>{zoomImg.title}</figcaption>
           </figure>
         </div>
@@ -1458,7 +1473,7 @@ export default function App() {
             <div className="modal-body">
               <div className="alt-source">
                 {altFor.img ? (
-                  <img src={altFor.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                  <img src={altFor.img} alt="" loading="lazy" decoding="async" onError={hideBrokenImg} />
                 ) : (
                   <div className="noimg" />
                 )}
@@ -1484,7 +1499,7 @@ export default function App() {
                     {alternatives.map((a) => (
                       <li key={a.product.id} className="alt-item">
                         {a.product.img ? (
-                          <img src={a.product.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                          <img src={a.product.img} alt="" loading="lazy" decoding="async" onError={hideBrokenImg} />
                         ) : (
                           <div className="noimg" />
                         )}
@@ -1536,7 +1551,7 @@ export default function App() {
                   return (
                     <li key={pr.id} className={cheaper ? "alt-item xs-best" : "alt-item"}>
                       {pr.img ? (
-                        <img src={pr.img} alt="" loading="lazy" onError={hideBrokenImg} />
+                        <img src={pr.img} alt="" loading="lazy" decoding="async" onError={hideBrokenImg} />
                       ) : (
                         <div className="noimg" />
                       )}
