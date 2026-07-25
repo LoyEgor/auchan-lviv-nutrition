@@ -63,19 +63,44 @@ npm run preview
 `base: "./"` in `vite.config.ts` keeps asset paths relative, so the build works
 locally, on any static host, and on a GitHub Pages project subpath.
 
-A ready-to-use **GitHub Actions** workflow (`.github/workflows/deploy.yml`)
-re-scrapes **both stores daily** at 09:17 UTC (≈ midday Kyiv — late enough that
-both retailers have rolled over to today's prices/stock, since they update on
-their own non-instant schedules), plus on push and manual dispatch, and deploys
-the fresh snapshot to GitHub Pages — no manual scraping needed. To enable: push
-to GitHub, then Settings → Pages → Source = "GitHub Actions".
+A **GitHub Actions** workflow (`.github/workflows/deploy.yml`) re-scrapes both
+stores, rebuilds the snapshot and deploys it to GitHub Pages — no manual
+scraping needed. To enable: push to GitHub, then Settings → Pages → Source =
+"GitHub Actions".
 
-The workflow caches `scraper/raw/` (which holds the Silpo per-product nutrition
-cache) between runs via `actions/cache`, so each run only fetches newly-listed
-products instead of re-fetching ~15k Silpo detail pages from cold. The scrape is
-all-or-nothing — `public/data` is republished only when both stores scrape
-cleanly, otherwise the last committed (complete) snapshot is deployed — and the
-job has a 30-minute timeout so a hung run can't stall the pipeline.
+The workflow caches `scraper/raw/` (the Silpo per-product nutrition cache plus
+the last verified snapshot) between runs via `actions/cache`, so each run only
+fetches newly-listed products instead of re-fetching ~15k Silpo detail pages
+from cold, and the job has a 30-minute timeout so a hung run can't stall the
+pipeline.
+
+## Reliability
+
+The pipeline is unattended, so every part of it is built to make a failure
+*visible* rather than to look healthy. Four things went wrong historically, and
+each has a countermeasure — do not remove one without replacing it:
+
+| Failure mode | Countermeasure |
+| --- | --- |
+| A cron run is delayed by hours or dropped entirely (GitHub gives no guarantee, and delays of 1–5h were routine) | **Three scheduled attempts a day** (06:07 / 11:07 / 16:07 UTC), all late enough that the retailers have rolled over to today's prices. One missed run no longer costs a day. |
+| A partial store outage produces a half-empty catalog: the scrapers deliberately tolerate per-category failures, so they exit 0 with a truncated snapshot | **`scraper/verify-data.mjs`** gates publishing — it rejects a snapshot that is not freshly written, is missing a store, falls under the per-store product floor, lost >25% of products versus the last good run, or carries no nutrition/discount data. |
+| A failed scrape published the six-week-old snapshot committed to git while the run stayed green | The fallback now comes from the **cached last-good snapshot** — the newest one that ever passed the gate, so normally hours old rather than weeks — and a degraded publish makes the run **fail** (`report` job) so the notification actually arrives. Consecutive failed days keep re-publishing that same snapshot, which is what the watchdog and the UI badge below are for. |
+| GitHub disables scheduled workflows after **60 days without repository activity**, and a disabled workflow cannot re-enable itself | The **`keepalive` job** pushes a heartbeat commit when the newest commit is older than 45 days. |
+
+Two more layers on top:
+
+- **`.github/workflows/freshness-watchdog.yml`** checks the *live* site once a
+  day and fails if the published `meta.generatedAt` is older than 30h. It is
+  independent of the deploy pipeline, so it also catches "the deploy looked
+  fine but nothing reached Pages".
+- The UI shows a red **"застарілі ціни"** badge when the loaded snapshot is
+  older than 36h — the failure is visible to whoever opens the site, without
+  looking at Actions.
+- `.github/dependabot.yml` bumps action majors monthly; a silently rotting
+  action runtime (the Node 20 deprecation) already broke the pipeline once.
+
+Manual run: Actions → "Scrape & Deploy" → *Run workflow*, or
+`gh workflow run deploy.yml --ref main`.
 
 ## Features
 

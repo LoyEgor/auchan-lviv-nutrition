@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "scrape": "npm run scrape:auchan && npm run scrape:silpo && npm run build:data",
+    "verify:data": "node scraper/verify-data.mjs",
     "scrape:auchan": "node scraper/scrape-auchan.mjs",
     "scrape:silpo": "node scraper/scrape-silpo.mjs",
     "build:data": "node scraper/build-data.mjs"

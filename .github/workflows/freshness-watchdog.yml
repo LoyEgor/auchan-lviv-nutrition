@@ -1,0 +1,32 @@
+name: Data freshness watchdog
+
+# Independent of Scrape & Deploy: it checks what the LIVE site actually serves.
+# Every failure mode that leaves the deploy pipeline looking healthy — cron runs
+# silently dropped, a Pages deployment that never went live, an artifact built
+# from a stale snapshot — shows up here as a failed run (and an email).
+on:
+  schedule:
+    - cron: "23 20 * * *" # ≈ 23:23 Kyiv, after all three scrape attempts
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if the published data is stale
+        env:
+          MAX_AGE_MIN: 1800 # 30h — one missed day is tolerated, two are not
+        run: |
+          set -euo pipefail
+          url="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/data/meta.json"
+          generated=$(curl -fsSL --retry 3 "$url" | jq -r .generatedAt)
+          # Minutes, not hours: integer division by 3600 would round 30h59m down
+          # to 30 and pass a snapshot that is over the limit.
+          age=$(( ( $(date -u +%s) - $(date -u -d "$generated" +%s) ) / 60 ))
+          echo "live snapshot: $generated ($age min old)"
+          if [ "$age" -gt "$MAX_AGE_MIN" ] || [ "$age" -lt -60 ]; then
+            echo "::error::Live site is serving data $age min old (limit $MAX_AGE_MIN) — the scrape pipeline is not delivering"
+            exit 1
+          fi

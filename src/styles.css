@@ -193,6 +193,15 @@ input:focus:not(:focus-visible) {
   line-height: 1;
   white-space: nowrap;
 }
+.stale-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
 .muted {
   color: var(--muted);
   font-size: 12px;
@@ -207,7 +216,9 @@ input:focus:not(:focus-visible) {
 }
 .search {
   width: 100%;
-  padding: 10px 14px;
+  /* Right padding reserves the count's strip so a long query slides under it
+     instead of colliding with it. */
+  padding: 10px 84px 10px 14px;
   border: none;
   border-radius: var(--radius);
   font-size: 14px;
@@ -218,8 +229,9 @@ input:focus:not(:focus-visible) {
 .search:focus {
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
-/* Result count as a muted suffix inside the search field (mobile browse mode);
-   hidden the instant the field is focused or a query is typed. */
+/* Result count as a muted suffix inside the search field. Always visible: while
+   searching it reads "shown з matched", which is the only place the difference
+   between "the query found nothing" and "the filters ate the results" shows. */
 .search-count {
   position: absolute;
   right: 12px;
@@ -233,6 +245,12 @@ input:focus:not(:focus-visible) {
   font-variant-numeric: tabular-nums;
   pointer-events: none;
   white-space: nowrap;
+}
+/* The native clear button collides with the count on narrow fields (it sits at
+   the end of the content box, which the count overlaps). Clearing the query has
+   its own always-visible chip under the field, so drop the native one. */
+.search::-webkit-search-cancel-button {
+  display: none;
 }
 .search-history {
   position: absolute;
@@ -1413,9 +1431,10 @@ input:focus:not(:focus-visible) {
     min-width: 0;
     margin-left: 0;
   }
-  /* Right padding clears the trailing result-count suffix (hidden while typing). */
+  /* Right padding clears the trailing result-count suffix, which stays visible
+     while typing and grows to "N з M" then. */
   .search {
-    padding: 8px max(64px, env(safe-area-inset-right)) 8px 12px;
+    padding: 8px max(92px, env(safe-area-inset-right)) 8px 12px;
   }
   .results-head {
     padding: 8px 12px;

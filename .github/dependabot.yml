@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Action majors go stale silently and then break the pipeline all at once
+  # (the Node 20 runtime deprecation already did it once).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

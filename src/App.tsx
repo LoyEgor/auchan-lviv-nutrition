@@ -42,6 +42,9 @@ const STORE_BADGE: Record<StoreId, { label: string; cls: string }> = {
 const LOGO_SRC = `${import.meta.env.BASE_URL}images/silpo-auchan-logo.svg`;
 // Same wordmark with the dark "Львів" recoloured white, for the dark theme.
 const LOGO_SRC_DARK = `${import.meta.env.BASE_URL}images/silpo-auchan-logo-dark.svg`;
+// The scrape runs three times a day; anything older than this means the
+// pipeline failed and the prices on screen are not today's.
+const STALE_AFTER_HOURS = 36;
 // Ascending is "better" for these (cheaper / text); numbers default to descending.
 const ASC_DEFAULT = new Set<SortKey>(["title", "pricePer100", "pricePerProtein"]);
 
@@ -657,6 +660,16 @@ export default function App() {
     return { filtered: list, catHits };
   }, [products, metrics, matcher, crossStore, category, brandFilter, store, discountOnly, cheaperElsewhere, completeOnly, inStockOnly, hidePetFood, plausibleOnly, minDensity, priceNums, rangeNums, sortKey, sortDir, basis]);
 
+  // How many products the query alone matches, before any other filter. Shown
+  // as the "N з M" denominator so a query that looks empty is visibly a filter
+  // problem, not a missing-data one. Recomputed per query, not per filter.
+  const searchTotal = useMemo(() => {
+    if (!matcher) return 0;
+    let n = 0;
+    for (let i = 0; i < products.length; i++) if (matcher(i)) n++;
+    return n;
+  }, [products, matcher]);
+
   // Count of non-default filters, shown on the mobile "Фільтри · N" button (now
   // the sole filter-active indicator once sort moved into the drawer). Counts
   // every drawer control that narrows the list away from its default — including
@@ -946,6 +959,8 @@ export default function App() {
     );
   }
 
+  const dataAgeHours = (Date.now() - new Date(meta.generatedAt).getTime()) / 3_600_000;
+
   // In the drawer a category tap applies instantly and dismisses the menu.
   const selectCategory = (id: string, inDrawer: boolean) => {
     setCategory(id);
@@ -1123,6 +1138,11 @@ export default function App() {
           <p className="brand-stats">
             {meta.totalKept.toLocaleString("uk-UA")} товарів · оновлено{" "}
             {new Date(meta.generatedAt).toLocaleDateString("uk-UA")}
+            {dataAgeHours > STALE_AFTER_HOURS && (
+              <span className="stale-badge" title="Автоматичне оновлення цін не спрацювало — показані ціни за попередній збір">
+                застарілі ціни
+              </span>
+            )}
           </p>
         </div>
         <div className="search-wrap">
@@ -1143,9 +1163,13 @@ export default function App() {
               }
             }}
           />
-          {!searchActive && !historyOpen && (
-            <span className="search-count">{filtered.length.toLocaleString("uk-UA")} товарів</span>
-          )}
+          <span className="search-count">
+            {/* `matcher` is null for a query with no usable tokens ("!!!"), which
+                filters nothing — showing "з 0" then would be a lie. */}
+            {searchActive && matcher
+              ? `${filtered.length.toLocaleString("uk-UA")} з ${searchTotal.toLocaleString("uk-UA")}`
+              : filtered.length.toLocaleString("uk-UA")}
+          </span>
           {historyOpen && historyItems.length > 0 && (
             <div className="search-history">
               {historyItems.map((h) => {
@@ -1284,9 +1308,7 @@ export default function App() {
                           ) : (
                             <div className="noimg" />
                           )}
-                          {store === "all" && (
-                            <span className={STORE_BADGE[p.store].cls + " on-img"}>{STORE_BADGE[p.store].label}</span>
-                          )}
+                          <span className={STORE_BADGE[p.store].cls + " on-img"}>{STORE_BADGE[p.store].label}</span>
                         </button>
                         <div className="m-card-title">
                           <a href={p.url ?? "#"} target="_blank" rel="noreferrer" className="ttl">
@@ -1380,9 +1402,7 @@ export default function App() {
                               {p.title}
                             </a>
                             <div className="sub">
-                              {store === "all" && (
-                                <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
-                              )}
+                              <span className={STORE_BADGE[p.store].cls}>{STORE_BADGE[p.store].label}</span>
                               {!p.inStock && <span className="oos">немає</span>}
                               <CrossChip info={crossStore.get(p.id)} onOpen={() => { setAltFor(null); setXstoreFor(p); }} />
                               {(hasAlt.size === 0 || hasAlt.has(p.id)) && (

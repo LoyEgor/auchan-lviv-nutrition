@@ -2,20 +2,18 @@ name: Scrape & Deploy
 
 # Re-scrapes both stores (Auchan Lviv via zakaz.ua, Silpo Lviv via sf-ecom-api),
 # rebuilds the merged snapshot and publishes the static site to GitHub Pages.
-# Runs daily, on push to main, and on manual dispatch — so the live data
-# (prices, discounts, stock) stays fresh without anyone running the scraper.
+# Every guard below exists because a green run once meant nothing — see the
+# README "Reliability" table before removing any of them.
 on:
   push:
     branches: [main]
   schedule:
-    # Daily at 09:17 UTC ≈ 12:17 Kyiv (EEST, summer) / 11:17 (EET, winter).
-    # Deliberately MIDDAY, not pre-open: the two retailers refresh their online
-    # catalogs/promos on their own (different, not-instant) schedules, so a dawn
-    # scrape risks capturing *yesterday's* data. By late morning both stores
-    # have certainly rolled over to today's prices and stock reflects real
-    # availability. The :17 minute avoids the top-of-hour GitHub Actions cron
-    # congestion that delays or drops scheduled runs.
-    - cron: "17 9 * * *"
+    # GitHub delays any single cron by 1–5h and sometimes drops it, so one a day
+    # is a coin flip, not a schedule. All three are late enough that the
+    # retailers have rolled over to today's prices; :07 dodges hourly queues.
+    - cron: "7 6 * * *" # ≈ 09:07 Kyiv
+    - cron: "7 11 * * *" # ≈ 14:07 Kyiv
+    - cron: "7 16 * * *" # ≈ 19:07 Kyiv
   workflow_dispatch:
 
 permissions:
@@ -25,32 +23,31 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
-
-env:
-  # Opt into GitHub's upcoming default for JavaScript actions now; the app build
-  # still uses the Node version configured in actions/setup-node below.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Never kill a run that is already scraping: a manual dispatch and a cron
+  # firing minutes apart used to cancel each other and leave the day unscraped.
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30 # a hung scrape must not run forever
+    outputs:
+      fresh: ${{ steps.gate.outputs.fresh }}
+      reason: ${{ steps.gate.outputs.reason }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
-      # Persist scraper/raw/ (gitignored) across runs. The Silpo scraper caches
-      # per-product nutrition in scraper/raw/silpo.details-cache.json; without
-      # this every CI run would re-fetch ~15k detail pages from a cold cache.
-      # With it, only newly-listed products are fetched, so the scrape stays
-      # fast and within the timeout. The rolling key (+ prefix restore-keys)
-      # always restores the most recent cache and saves an updated one.
+      # Persists scraper/raw/ (gitignored) across runs: the Silpo nutrition
+      # cache (silpo.details-cache.json), so a run only fetches newly-listed
+      # products instead of ~15k detail pages, and last-good/, the most recent
+      # verified snapshot used as the fallback below. The rolling key + prefix
+      # restore-keys always restores the newest cache and saves an updated one.
       - name: Restore scraper cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: scraper/raw
           key: scraper-raw-${{ github.run_id }}
@@ -59,19 +56,51 @@ jobs:
 
       - run: npm ci
 
-      # All-or-nothing on purpose: `npm run scrape` chains
-      # scrape:auchan && scrape:silpo && build:data, so public/data is rewritten
-      # only when BOTH stores scrape cleanly. If anything fails we keep the
-      # last committed snapshot (a complete two-store dataset) rather than
-      # publishing a half-store one.
-      - name: Scrape both stores (fall back to committed snapshot on failure)
-        run: npm run scrape || echo "scrape failed — deploying last committed snapshot"
+      - name: Scrape both stores
+        id: scrape
+        continue-on-error: true
+        run: npm run scrape
+
+      - name: Verify the fresh snapshot
+        id: verify
+        if: steps.scrape.outcome == 'success'
+        continue-on-error: true
+        run: npm run verify:data
+
+      # The scrapers tolerate per-category failures by design, so "scrape
+      # succeeded" says nothing about the catalog being complete — only
+      # verify-data does. Whatever it rejects is replaced by the last verified
+      # snapshot rather than published as today's prices.
+      - name: Decide what gets published
+        id: gate
+        run: |
+          if [ "${{ steps.verify.outcome }}" = "success" ]; then
+            rm -rf scraper/raw/last-good
+            mkdir -p scraper/raw/last-good
+            cp public/data/*.json scraper/raw/last-good/
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${{ steps.scrape.outcome }}" = "success" ]; then
+            reason="snapshot rejected by verify-data"
+          else
+            reason="scrape failed"
+          fi
+          if [ -f scraper/raw/last-good/meta.json ]; then
+            cp scraper/raw/last-good/*.json public/data/
+            reason="$reason; deployed last good snapshot from $(jq -r .generatedAt scraper/raw/last-good/meta.json)"
+          else
+            reason="$reason; no cached snapshot — deploying the one committed to git"
+          fi
+          echo "::error::$reason"
+          echo "fresh=false" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
 
       - run: npm run build
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         with:
           enablement: true
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
@@ -83,4 +112,41 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+
+  # GitHub disables scheduled workflows after 60 days without repository
+  # activity, and the disabled workflow cannot re-enable itself — the site then
+  # quietly serves months-old prices. A heartbeat commit resets that clock.
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Refresh repository activity before the 60-day cutoff
+        run: |
+          age_days=$(( ( $(date -u +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "last commit: ${age_days}d ago"
+          if [ "$age_days" -lt 45 ]; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          date -u +%FT%TZ > .github/last-activity
+          git add .github/last-activity
+          git commit -m "chore: keep scheduled workflows enabled [skip ci]"
+          git push origin HEAD:main
+
+  # Turns a degraded publish into a failed run: green checkmarks on stale data
+  # are the reason this pipeline could rot unnoticed for weeks.
+  report:
+    needs: [build, deploy]
+    if: always() && needs.build.outputs.fresh != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # Through env, not inline interpolation: the reason is assembled from
+      # scraper output and must never be parsed as shell.
+      - env:
+          REASON: ${{ needs.build.outputs.reason || 'the build job failed' }}
+        run: |
+          echo "::error::Site did NOT get fresh data: $REASON"
+          exit 1
