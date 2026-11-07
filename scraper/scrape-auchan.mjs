@@ -8,7 +8,7 @@
 // No external deps: relies on Node 18+ global fetch. Run: `node scraper/scrape-auchan.mjs`.
 
 import { join } from "node:path";
-import { RAW_DIR, fetchJson, num, pool, writeJson } from "./lib.mjs";
+import { RAW_DIR, fetchJson, num, pool, sleep, writeJson } from "./lib.mjs";
 
 const STORE_ID = "48246409"; // Auchan Lviv DRIVE
 const BASE = `https://stores-api.zakaz.ua/stores/${STORE_ID}`;
@@ -18,7 +18,12 @@ const HEADERS = {
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
 };
 const PER_PAGE = 100; // API rejects per_page > 100 with HTTP 400
-const CONCURRENCY = 6;
+// zakaz.ua throttles (HTTP 429) GitHub runner IPs; 6 parallel pagers tripped it
+// on most runs. 3 keeps a full run at a few minutes.
+const CONCURRENCY = 3;
+// Pause before re-trying the categories that still failed, so the throttle
+// window can close.
+const RETRY_PAUSE_MS = 90_000;
 
 // Energy may rarely come as kJ — normalize to kcal.
 function energyKcal(s) {
@@ -70,10 +75,12 @@ async function run() {
   let processed = 0;
 
   // Fetch one top-level category fully (all pages of its whole subtree).
+  // top.page remembers where a failed attempt stopped, so a retry resumes there
+  // instead of re-counting pages it already saw.
   async function processTop(top) {
-    let page = 1;
+    top.page ??= 1;
     while (true) {
-      const url = `${BASE}/categories/${encodeURIComponent(top.id)}/products/?page=${page}&per_page=${PER_PAGE}`;
+      const url = `${BASE}/categories/${encodeURIComponent(top.id)}/products/?page=${top.page}&per_page=${PER_PAGE}`;
       const data = await fetchJson(url, { headers: HEADERS });
       const results = data?.results || [];
       if (!results.length) break;
@@ -115,20 +122,36 @@ async function run() {
         });
       }
       if (results.length < PER_PAGE) break;
-      page++;
+      top.page++;
     }
     processed++;
     console.log(`[auchan]  [${processed}/${topCategories.length}] ${top.title} — kept ${byEan.size}, seen ${totalSeen}`);
   }
 
   console.log("[auchan] Fetching products…");
+  let failed = [];
   await pool(topCategories, CONCURRENCY, async (top) => {
     try {
       await processTop(top);
     } catch (e) {
+      failed.push(top);
       console.warn(`[auchan]  ! top ${top.id} failed: ${e.message}`);
     }
   });
+  if (failed.length) {
+    console.log(`[auchan] Retrying ${failed.length} failed categories one by one after ${RETRY_PAUSE_MS / 1000}s…`);
+    await sleep(RETRY_PAUSE_MS);
+    const retry = failed;
+    failed = [];
+    for (const top of retry) {
+      try {
+        await processTop(top);
+      } catch (e) {
+        failed.push(top);
+        console.warn(`[auchan]  ! top ${top.id} failed again: ${e.message}`);
+      }
+    }
+  }
 
   const products = [...byEan.values()];
   const snapshot = {
@@ -140,7 +163,7 @@ async function run() {
     products,
   };
   await writeJson(join(RAW_DIR, "auchan.json"), snapshot);
-  console.log(`[auchan] DONE: kept ${products.length} of ${totalSeen} seen, discounts: ${products.filter((p) => p.oldPrice != null).length}`);
+  console.log(`[auchan] DONE: kept ${products.length} of ${totalSeen} seen, discounts: ${products.filter((p) => p.oldPrice != null).length}${failed.length ? `, still failed: ${failed.map((t) => t.id).join(", ")}` : ""}`);
 }
 
 run().catch((e) => {
