@@ -30,6 +30,35 @@ export function pricePer100g(p: Product): number | null {
   return size == null ? null : (p.price * 100) / size;
 }
 
+// Servings in a capsule pack (coffee pods, supplements), read from the title;
+// null for anything that isn't sold in capsules or whose count isn't stated.
+// For capsules the meaningful price is per capsule, not per 100 g: 10 pods of
+// 5.2 g read as 375 ₴/100 g but are really 19.5 ₴ a cup.
+export function capsuleCount(p: Product): number | null {
+  const t = p.title;
+  // Plural forms only: a singular "капсула" is a gift box ("бокс-капсула").
+  if (!/капсул(?:и|ах|ами)?(?![а-яіїєґ])/i.test(t)) return null;
+  // Dolce Gusto milk drinks: "8 кавових + 8 молочних капсул" is 8 cups, not 16.
+  // No "×N" rule: the "х" ending "капсулах 104г" would read as a multiplier.
+  const m =
+    t.match(/(\d+)\s*кавових\s*\+\s*\d+\s*молочних/i) || t.match(/(\d+)\s*капсул/i) || t.match(/(\d+)\s*шт/i);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isInteger(n) && n > 1 && n <= 500 ? n : null;
+}
+
+// Price of one capsule, for capsule-sold goods; null otherwise.
+export function pricePerCapsule(p: Product): number | null {
+  if (p.price == null || p.price <= 0) return null;
+  const n = capsuleCount(p);
+  return n == null ? null : p.price / n;
+}
+
+// The "₴ per unit" cell: per capsule for capsule goods, per 100 g otherwise.
+export function fmtUnitPrice(p: Product): string {
+  const caps = pricePerCapsule(p);
+  return caps != null ? `${fmtPrice(caps)}/капс` : fmtPrice(pricePer100g(p));
+}
+
 // Protein per 100 kcal — "leanness" / protein density of a food. Basis-independent.
 export function proteinPerKcal(p: Product): number | null {
   if (p.protein == null || p.kcal == null || p.kcal <= 0) return null;

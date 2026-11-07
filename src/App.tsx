@@ -5,6 +5,8 @@ import type { Product, Category, Meta, NutrientKey, Basis, StoreId } from "./typ
 import {
   nutrientValue,
   pricePer100g,
+  pricePerCapsule,
+  fmtUnitPrice,
   proteinPerKcal,
   pricePerProtein,
   isPlausible,
@@ -67,7 +69,7 @@ const COLUMNS: Column[] = [
   { key: "carbs", label: "Вугл.", align: "right" },
   { key: "proteinPerKcal", label: "Б/100ккал", title: "Білок на 100 ккал — щільність білка", align: "right", accent: true },
   { key: "pricePerProtein", label: "₴/100гБ", title: "Ціна за 100 г білка — раціональність за гроші", align: "right", accent: true },
-  { key: "pricePer100", label: "₴/100г", title: "Ціна за 100 г / 100 мл", align: "right" },
+  { key: "pricePer100", label: "₴/100г", title: "Ціна за 100 г / 100 мл; для капсул — за капсулу (окремою групою)", align: "right" },
   { key: "price", label: "Ціна", align: "right" },
 ];
 
@@ -78,7 +80,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "protein", label: "Білки" },
   { key: "fat", label: "Жири" },
   { key: "carbs", label: "Вуглеводи" },
-  { key: "pricePer100", label: "Ціна за 100 г" },
+  { key: "pricePer100", label: "Ціна за 100 г / капсулу" },
   { key: "price", label: "Ціна" },
   { key: "title", label: "Назва" },
 ];
@@ -264,6 +266,7 @@ const SAVED = sanitizeSaved(loadJSON(FILTERS_KEY));
 // recomputed for every comparison).
 interface Metrics {
   per100: number | null;
+  perCaps: number | null; // capsule goods: their unit price is per capsule
   density: number | null;
   perProtein: number | null;
 }
@@ -546,7 +549,12 @@ export default function App() {
   const metrics = useMemo(() => {
     const m = new Map<string, Metrics>();
     for (const p of products) {
-      m.set(p.id, { per100: pricePer100g(p), density: proteinPerKcal(p), perProtein: pricePerProtein(p) });
+      m.set(p.id, {
+        per100: pricePer100g(p),
+        perCaps: pricePerCapsule(p),
+        density: proteinPerKcal(p),
+        perProtein: pricePerProtein(p),
+      });
     }
     return m;
   }, [products]);
@@ -643,8 +651,10 @@ export default function App() {
             return nutrientValue(p, sortKey, basis);
           case "price":
             return p.price;
-          case "pricePer100":
-            return metrics.get(p.id)?.per100 ?? null;
+          case "pricePer100": {
+            const m = metrics.get(p.id);
+            return m?.perCaps ?? m?.per100 ?? null;
+          }
           case "pricePerProtein":
             return metrics.get(p.id)?.perProtein ?? null;
           case "proteinPerKcal":
@@ -653,8 +663,15 @@ export default function App() {
             return null;
         }
       };
-      const decorated = list.map((p) => ({ p, k: keyOf(p) }));
-      decorated.sort((a, b) => compareNullable(a.k, b.k, sortDir));
+      // ₴ per capsule and ₴ per 100 g don't compare, so in the unit-price sort
+      // capsule goods form their own group after the per-100 g ones.
+      // Items with no value stay last overall, after the capsule group too.
+      const decorated = list.map((p) => {
+        const k = keyOf(p);
+        const g = k == null ? 2 : sortKey === "pricePer100" && metrics.get(p.id)?.perCaps != null ? 1 : 0;
+        return { p, k, g };
+      });
+      decorated.sort((a, b) => a.g - b.g || compareNullable(a.k, b.k, sortDir));
       for (let i = 0; i < decorated.length; i++) list[i] = decorated[i].p;
     }
     return { filtered: list, catHits };
@@ -1328,7 +1345,11 @@ export default function App() {
                         <Stat label="Вугл." value={fmt(nutrientValue(p, "carbs", basis))} />
                         <Stat label="Б/100к" value={fmt(proteinPerKcal(p))} accent />
                         <Stat label="₴/100гБ" value={fmtPrice(pricePerProtein(p))} accent />
-                        <Stat label="₴/100г" value={fmtPrice(pricePer100g(p))} />
+                        {metrics.get(p.id)?.perCaps != null ? (
+                          <Stat label="₴/капс" value={fmtPrice(metrics.get(p.id)?.perCaps ?? null)} />
+                        ) : (
+                          <Stat label="₴/100г" value={fmtPrice(pricePer100g(p))} />
+                        )}
                         <Stat
                           label="Ціна"
                           value={
@@ -1429,7 +1450,7 @@ export default function App() {
                           <div className="td right">{fmt(nutrientValue(p, "carbs", basis))}</div>
                           <div className="td right accent">{fmt(proteinPerKcal(p))}</div>
                           <div className="td right accent">{fmtPrice(pricePerProtein(p))}</div>
-                          <div className="td right">{fmtPrice(pricePer100g(p))}</div>
+                          <div className="td right">{fmtUnitPrice(p)}</div>
                           <div className="td right">
                             {p.oldPrice != null && <span className="old-price">{fmtPrice(p.oldPrice)}</span>}
                             <span className={p.oldPrice != null ? "discount-price" : undefined}>{fmtPrice(p.price)}</span>
